@@ -1,5 +1,5 @@
 import { Outlet, Link } from 'react-router-dom'
-import { MessageCircle, Store, Users, Package, Settings, Activity, LayoutDashboard, ChevronDown } from 'lucide-react'
+import { MessageCircle, Store, Users, Package, Settings, Activity, LayoutDashboard } from 'lucide-react'
 
 export default function Layout() {
   return (

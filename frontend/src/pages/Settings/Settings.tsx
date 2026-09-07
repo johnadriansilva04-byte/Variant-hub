@@ -16,7 +16,7 @@ export default function Settings() {
   const [telegramConfig, setTelegramConfig] = useState({
     botToken: ''
   })
-  const [tiktokConfig, setTiktokConfig] = useState({
+  const [tiktokConfig] = useState({
     accessToken: ''
   })
 

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowRight, MessageCircle, Users } from 'lucide-react'
+import { ArrowRight, MessageCircle } from 'lucide-react'
 import PageHeader from '../../components/ui/PageHeader'
 import Panel from '../../components/ui/Panel'
 import Stat from '../../components/ui/Stat'

@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom'
 import { Users, Repeat, ShoppingBag, ArrowUpRight } from 'lucide-react'
 import PageHeader from '../../components/ui/PageHeader'
 import Panel from '../../components/ui/Panel'
-import { customersService } from '../../services/customers'
+// import { customersService } from '../../services/customers'
 
 export default function Customers() {
-  const [customers, setCustomers] = useState<any[]>([])
+  const [customers] = useState<any[]>([])
 
   const stages = ['Novo lead', 'Em orçamento', '1ª compra', 'Recorrente', 'Inativo']
 

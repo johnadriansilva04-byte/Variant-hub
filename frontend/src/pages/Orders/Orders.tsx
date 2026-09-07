@@ -1,15 +1,15 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { MessageCircle, PackageCheck, Plus, CreditCard } from 'lucide-react'
+import { MessageCircle, Plus, CreditCard } from 'lucide-react'
 import PageHeader from '../../components/ui/PageHeader'
 import Panel from '../../components/ui/Panel'
 import StatusBadge from '../../components/ui/StatusBadge'
 import ChannelChip from '../../components/ui/ChannelChip'
-import { ordersService } from '../../services/orders'
+// import { ordersService } from '../../services/orders'
 
 export default function Orders() {
   const [status, setStatus] = useState('Todos')
-  const [orders, setOrders] = useState<any[]>([])
+  const [orders] = useState<any[]>([])
 
   const statusFilter = ['Todos', 'Aguardando cliente', 'Pagamento pendente', 'Confirmado', 'Em separação', 'Enviado', 'Entregue']
 

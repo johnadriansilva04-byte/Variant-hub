@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Cube } from 'lucide-react'
+import { Plus, Package } from 'lucide-react'
 import PageHeader from '../../components/ui/PageHeader'
 import Panel from '../../components/ui/Panel'
-import { productsService } from '../../services/products'
+// import { productsService } from '../../services/products'
 
 export default function Catalog() {
-  const [products, setProducts] = useState<any[]>([])
+  const [products] = useState<any[]>([])
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -26,7 +26,7 @@ export default function Catalog() {
         <div className="card p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-store-500/10 text-store-400 flex items-center justify-center">
-              <Cube className="w-5 h-5" />
+              <Package className="w-5 h-5" />
             </div>
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-dark-500">Produtos ativos</p>
@@ -37,7 +37,7 @@ export default function Catalog() {
         <div className="card p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
-              <Cube className="w-5 h-5" />
+              <Package className="w-5 h-5" />
             </div>
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-dark-500">Estoque baixo</p>
@@ -48,7 +48,7 @@ export default function Catalog() {
         <div className="card p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center">
-              <Cube className="w-5 h-5" />
+              <Package className="w-5 h-5" />
             </div>
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-dark-500">Esgotados</p>

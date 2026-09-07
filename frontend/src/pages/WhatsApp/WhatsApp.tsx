@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Send, RefreshCw, MessageCircle, Users, ArrowLeft } from 'lucide-react'
+import { Send, RefreshCw, MessageCircle, ArrowLeft } from 'lucide-react'
 import PageHeader from '../../components/ui/PageHeader'
 import Panel from '../../components/ui/Panel'
 import StatusBadge from '../../components/ui/StatusBadge'

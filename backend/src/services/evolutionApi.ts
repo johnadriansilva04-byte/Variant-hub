@@ -69,7 +69,15 @@ class EvolutionApiService {
       `${this.apiUrl}/instance/connectionState/${this.config?.instanceName}`,
       { headers: this.headers }
     )
-    return response.data
+    const data = response.data
+    const state = data.state || data.instance?.state || 'close'
+    return {
+      state,
+      instance: {
+        instanceName: data.instance?.instanceName || this.config!.instanceName,
+        status: data.instance?.status || data.instance?.state || state
+      }
+    }
   }
 
   async getChats(): Promise<Chat[]> {

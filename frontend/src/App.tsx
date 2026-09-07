@@ -12,11 +12,15 @@ import Customers from './pages/Customers/Customers'
 import Catalog from './pages/Catalog/Catalog'
 import Settings from './pages/Settings/Settings'
 import System from './pages/System/System'
+import Login from './pages/Login/Login'
+import Register from './pages/Register/Register'
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/whatsapp" element={<WhatsApp />} />

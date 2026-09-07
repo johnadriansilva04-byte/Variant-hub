@@ -1,0 +1,624 @@
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import {
+  ArrowRight,
+  ArrowUpRight,
+  BarChart3,
+  Bot,
+  MessageCircle,
+  Package,
+  Search,
+  Send,
+  Settings2,
+  ShoppingCart,
+  Sparkles,
+  Users,
+  Wallet,
+} from 'lucide-react'
+import { cn } from '../../utils/cn'
+import PageHeader from '../../components/ui/PageHeader'
+import Panel from '../../components/ui/Panel'
+import KpiCard from '../../components/ui/KpiCard'
+import Stat from '../../components/ui/Stat'
+import StatusBadge from '../../components/ui/StatusBadge'
+import ChannelChip from '../../components/ui/ChannelChip'
+import { FunnelSteps } from '../../components/ui/Funnel'
+import { automationFlows, conversations, storeKpis, supportKpis } from '../../data/demo'
+import { whatsappApi, integrationsApi } from '../../services/api'
+import MessageHistory from '../../components/ui/MessageHistory'
+import type { Conversation } from '../../data/demo'
+
+type Tab = 'overview' | 'service' | 'automation' | 'integration'
+
+const tabs: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'Visão geral' },
+  { id: 'service', label: 'Atendimento' },
+  { id: 'automation', label: 'Automação de vendas' },
+  { id: 'integration', label: 'Integração' },
+]
+
+const moduleNav = [
+  { to: '/catalog', icon: Package, title: 'Catálogo', desc: 'Produtos, preços e estoque sincronizados no WhatsApp' },
+  { to: '/orders', icon: ShoppingCart, title: 'Pedidos', desc: 'Status, pagamento e entrega de ponta a ponta' },
+  { to: '/customers', icon: Users, title: 'Clientes', desc: 'Quem compra, quanto gasta e quando volta' },
+  { to: '/store', icon: BarChart3, title: 'Analytics', desc: 'Funil, ticket e origem de cada venda' },
+]
+
+const todayFunnel = [
+  { label: 'Contatos', value: 248, zone: 'store' as const },
+  { label: 'Com interesse', value: 164, zone: 'store' as const },
+  { label: 'Orçamentos', value: 92, zone: 'store' as const },
+  { label: 'Pedidos hoje', value: 41, zone: 'store' as const },
+]
+
+const statusTone: Record<Conversation['status'], 'green' | 'yellow' | 'blue' | 'slate'> = {
+  Novo: 'yellow',
+  'IA respondendo': 'green',
+  'Humano ativo': 'blue',
+  'Aguardando cliente': 'slate',
+}
+
+const storeFlows = automationFlows.filter((f) => f.zone === 'store')
+
+export default function WhatsApp() {
+  const [tab, setTab] = useState<Tab>('overview')
+  const [filter, setFilter] = useState<'all' | 'IA' | 'Humano'>('all')
+  const [query, setQuery] = useState('')
+  
+  // Real data states
+  const [whatsappStatus, setWhatsappStatus] = useState<any>(null)
+  const [realConversations, setRealConversations] = useState<Conversation[]>([])
+  const [whatsappStats, setWhatsappStats] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
+  
+  // Evolution API configuration
+  const [evolutionConfig, setEvolutionConfig] = useState({
+    apiUrl: '',
+    apiKey: '',
+    instanceName: '',
+    phoneNumber: ''
+  })
+
+  // Load configuration from Supabase integrations table on mount
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const integrations = await integrationsApi.list()
+        const whatsappIntegration = integrations.find((i: any) => i.type === 'whatsapp')
+        if (whatsappIntegration && whatsappIntegration.config) {
+          setEvolutionConfig(whatsappIntegration.config)
+        }
+      } catch (error) {
+        console.error('Error loading config:', error)
+      }
+    }
+    loadConfig()
+  }, [])
+
+  const handleSaveEvolutionConfig = async () => {
+    try {
+      // Check if WhatsApp integration already exists
+      const integrations = await integrationsApi.list()
+      const existingIntegration = integrations.find((i: any) => i.type === 'whatsapp')
+
+      if (existingIntegration) {
+        // Update existing integration
+        await integrationsApi.update(existingIntegration.id, {
+          name: 'Evolution API WhatsApp',
+          type: 'whatsapp',
+          config: evolutionConfig,
+          status: 'active'
+        })
+      } else {
+        // Create new integration
+        await integrationsApi.create({
+          name: 'Evolution API WhatsApp',
+          type: 'whatsapp',
+          config: evolutionConfig,
+          status: 'active'
+        })
+      }
+      
+      alert('Configuração salva com sucesso no Supabase! Recarregando a página...')
+      
+      // Reload page to apply new configuration
+      window.location.reload()
+    } catch (error) {
+      console.error('Error saving config:', error)
+      alert('Erro ao salvar configuração no Supabase')
+    }
+  }
+
+  const handleTestConnection = async () => {
+    try {
+      const status = await whatsappApi.getStatus(evolutionConfig)
+      if (status.connected) {
+        alert('✅ Conexão com Evolution API estabelecida com sucesso!')
+      } else {
+        alert('⚠️ Configuração salva, mas a instância não está conectada. Verifique o QR Code.')
+      }
+    } catch (error) {
+      console.error('Error testing connection:', error)
+      alert('❌ Erro ao testar conexão. Verifique as configurações.')
+    }
+  }
+
+  useEffect(() => {
+    const fetchWhatsAppData = async () => {
+      try {
+        // Load configuration from Supabase integrations table
+        const integrations = await integrationsApi.list()
+        const whatsappIntegration = integrations.find((i: any) => i.type === 'whatsapp')
+        
+        if (!whatsappIntegration || !whatsappIntegration.config) {
+          setLoading(false)
+          return // No configuration, show empty state
+        }
+
+        const config = whatsappIntegration.config
+
+        const [status, conversationsData, stats] = await Promise.all([
+          whatsappApi.getStatus(config),
+          whatsappApi.getConversations(config),
+          whatsappApi.getStats(config)
+        ])
+        
+        setWhatsappStatus(status)
+        setRealConversations(conversationsData)
+        setWhatsappStats(stats)
+      } catch (error) {
+        console.error('Error fetching WhatsApp data:', error)
+        // Fall back to demo data if API fails
+        setRealConversations(conversations)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchWhatsAppData()
+  }, [])
+
+  const list = realConversations.filter((c) => {
+    const matchesFilter = filter === 'all' || c.handledBy === filter
+    const q = query.trim().toLowerCase()
+    const matchesQuery = !q || c.customer.toLowerCase().includes(q) || c.context.toLowerCase().includes(q)
+    return matchesFilter && matchesQuery
+  })
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        zone="store"
+        zoneLabel="LOJA · WhatsApp"
+        title="Gestão da loja"
+        description="O WhatsApp é o seu caixa: vitrine, atendimento que vende, pedidos e automação de conversão — tudo num só lugar."
+        actions={
+          <>
+            <Link to="/orders" className="btn-store text-xs">
+              <ShoppingCart className="w-4 h-4" /> Novo pedido
+            </Link>
+            <Link to="/catalog" className="btn-outline-store text-xs">
+              <Package className="w-4 h-4" /> Editar vitrine
+            </Link>
+          </>
+        }
+        right={
+          <div className="flex items-center gap-2">
+            {loading ? (
+              <StatusBadge tone="yellow">Carregando...</StatusBadge>
+            ) : !evolutionConfig.apiUrl ? (
+              <StatusBadge tone="yellow">⚠️ Não configurado</StatusBadge>
+            ) : whatsappStatus?.connected ? (
+              <StatusBadge tone="green">🟢 Conectado</StatusBadge>
+            ) : (
+              <StatusBadge tone="red">🔴 Desconectado</StatusBadge>
+            )}
+            {evolutionConfig.phoneNumber && (
+              <span className="zone-kicker bg-dark-800/80 text-dark-300 border-dark-700">{evolutionConfig.phoneNumber}</span>
+            )}
+          </div>
+        }
+      />
+
+      {/* Module quick nav */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {moduleNav.map((m) => (
+          <Link
+            key={m.to}
+            to={m.to}
+            className="card card-hover p-5 group relative overflow-hidden !rounded-2xl"
+          >
+            <span className="absolute inset-x-0 top-0 h-[2px] bg-store-500/60 group-hover:bg-store-400 transition-colors" />
+            <div className="flex items-start justify-between">
+              <span className="icon-badge bg-store-500/10 text-store-400">
+                <m.icon className="w-5 h-5" />
+              </span>
+              <ArrowUpRight className="w-4 h-4 text-dark-500 group-hover:text-store-400 transition-colors" />
+            </div>
+            <h3 className="font-semibold text-dark-50 mt-3 text-[15px]">{m.title}</h3>
+            <p className="text-xs text-dark-500 mt-1 leading-relaxed">{m.desc}</p>
+          </Link>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-dark-800 overflow-x-auto scrollbar-thin">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={cn(
+              'px-4 py-2.5 text-[13px] font-semibold whitespace-nowrap border-b-2 -mb-px transition-colors',
+              tab === t.id
+                ? 'text-store-400 border-store-400'
+                : 'text-dark-400 border-transparent hover:text-dark-100'
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ---------------- VISÃO GERAL ---------------- */}
+      {tab === 'overview' && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <KpiCard label="Vendas hoje" value={storeKpis.vendasHoje.value} icon={<ShoppingCart className="w-5 h-5" />} tone="store" delta={storeKpis.vendasHoje.delta} to="/orders" />
+            <KpiCard label="Faturamento hoje" value={storeKpis.faturamentoHoje.value} icon={<Wallet className="w-5 h-5" />} tone="store" delta={storeKpis.faturamentoHoje.delta} />
+            <KpiCard label="Conversas hoje" value={whatsappStats?.activeConversations || loading ? '...' : '248'} icon={<MessageCircle className="w-5 h-5" />} tone="sky" delta={{ value: '+12%', up: true }} />
+            <KpiCard label="Contatos únicos" value={whatsappStats?.uniqueContacts || loading ? '...' : '156'} icon={<Users className="w-5 h-5" />} tone="store" delta={{ value: '+8%', up: true }} />
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+            <Panel title="Funil do dia" subtitle="De cada conversa que abre, quantas viram pedido" tone="store" className="rounded-2xl">
+              <FunnelSteps data={todayFunnel} />
+              <div className="mt-6 grid grid-cols-2 gap-3">
+                <Stat label="IA fechou vendas hoje" value="31 de 41" tone="store" sub="76% dos pedidos" />
+                <Stat label="Tempo médio até o pedido" value="9 min" sub="da 1ª mensagem ao Pix" />
+              </div>
+            </Panel>
+
+            <Panel title="Atendimento ao vivo" subtitle="Quem está falando com o cliente agora" tone="store" className="rounded-2xl">
+              <div className="flex items-center justify-between mb-4 text-xs">
+                <span className="text-dark-300">{whatsappStats?.activeConversations || supportKpis.active} conversas abertas</span>
+                <button onClick={() => setTab('service')} className="text-store-400 font-semibold inline-flex items-center gap-1 hover:text-store-300">
+                  Atender <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex h-2.5 rounded-full overflow-hidden bg-dark-800 mb-5">
+                <div className="bg-store-500" style={{ width: `${supportKpis.aiHandling * 4.2}%` }} />
+                <div className="bg-sky-500" style={{ width: `${supportKpis.humanQueue * 4.2}%` }} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Stat label="IA respondendo" value={supportKpis.aiHandling} tone="store" sub="com catálogo e ofertas" />
+                <Stat label="Fila humana" value={supportKpis.humanQueue} tone="sky" sub="espera média 1m 40s" />
+              </div>
+              <ul className="mt-5 space-y-2">
+                {realConversations.slice(0, 3).map((c) => (
+                  <li key={c.customer} className="flex items-center gap-3">
+                    <span className="w-7 h-7 rounded-full bg-store-500/15 text-store-400 text-[10px] font-bold flex items-center justify-center">
+                      {c.initials}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-dark-100 truncate font-medium">{c.customer}</p>
+                      <p className="text-[10px] text-dark-500 truncate">{c.context}</p>
+                    </div>
+                    <StatusBadge tone={statusTone[c.status]} dot={false}>{c.handledBy}</StatusBadge>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- ATENDIMENTO ---------------- */}
+      {tab === 'service' && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Stat label="Conversas ativas" value={whatsappStats?.activeConversations || supportKpis.active} tone="store" sub="agora no WhatsApp" />
+            <Stat label="IA respondendo" value={supportKpis.aiHandling} tone="store" sub="74% resolvidas só por IA" />
+            <Stat label="Na fila humana" value={supportKpis.humanQueue} tone="sky" sub="quando a IA pede ajuda" />
+            <Stat label="SLA de resposta" value={`${supportKpis.slaOk}%`} tone="store" sub="até 2 minutos" />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {(['all', 'IA', 'Humano'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={cn(
+                  'px-3 py-1.5 rounded-full text-xs font-semibold transition-colors',
+                  filter === f ? 'bg-store-500 text-dark-950' : 'bg-dark-800 text-dark-300 hover:bg-dark-700'
+                )}
+              >
+                {f === 'all' ? 'Todas' : f === 'IA' ? 'IA' : 'Humanas'}
+              </button>
+            ))}
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="input-field !py-2 pl-9 text-sm"
+                placeholder="Buscar cliente ou assunto..."
+              />
+            </div>
+          </div>
+
+          <Panel flush className="!p-0 rounded-2xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px]">
+                <thead>
+                  <tr className="border-b border-dark-800 bg-dark-900/60">
+                    <th className="table-head">Cliente</th>
+                    <th className="table-head">Assunto</th>
+                    <th className="table-head">Atendido por</th>
+                    <th className="table-head">Status</th>
+                    <th className="table-head">Atividade</th>
+                    <th className="table-head text-right">Ação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((c) => (
+                    <tr key={c.customer} className="border-b border-dark-800/60 last:border-0 hover:bg-dark-800/40 transition-colors">
+                        <td className="table-cell">
+                          <div className="flex items-center gap-3">
+                            <span className="w-8 h-8 rounded-full bg-store-500/15 text-store-400 text-[11px] font-bold flex items-center justify-center flex-shrink-0">
+                              {c.initials}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-[13px] font-medium text-dark-50 truncate">{c.customer}</p>
+                              <p className="text-[10px] text-dark-500 truncate">via {c.origin}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="table-cell text-dark-300 max-w-[260px]">
+                          <p className="truncate">{c.context}</p>
+                        </td>
+                        <td className="table-cell">
+                          <StatusBadge tone={c.handledBy === 'IA' ? 'green' : 'blue'} dot={false}>
+                            <Bot className="w-3 h-3" /> {c.handledBy}
+                          </StatusBadge>
+                        </td>
+                        <td className="table-cell">
+                          <StatusBadge tone={statusTone[c.status]}>{c.status}</StatusBadge>
+                        </td>
+                        <td className="table-cell text-dark-500 whitespace-nowrap">{c.lastActivity}</td>
+                        <td className="table-cell text-right">
+                          <button 
+                            onClick={() => setSelectedConversation(c)}
+                            className="text-xs font-semibold text-store-400 hover:text-store-300 inline-flex items-center gap-1"
+                          >
+                            Ver conversa <ArrowUpRight className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {/* ---------------- AUTOMAÇÃO DE VENDAS ---------------- */}
+      {tab === 'automation' && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start animate-fade-in">
+          <div className="xl:col-span-2 space-y-4">
+            <Panel title="Fluxos de venda ativos" subtitle="Automações que empurram a conversa até o pagamento" tone="store" className="rounded-2xl" flush>
+              <ul className="divide-y divide-dark-800">
+                {storeFlows.map((f) => (
+                  <li key={f.name} className="py-4 px-1 flex items-start gap-4">
+                    <span className="icon-badge w-10 h-10 bg-store-500/10 text-store-400">
+                      <Sparkles className="w-5 h-5" />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-dark-50">{f.name}</p>
+                        <StatusBadge tone={f.status === 'active' ? 'green' : f.status === 'paused' ? 'yellow' : 'slate'} dot={false}>
+                          {f.status === 'active' ? 'Ativo' : f.status === 'paused' ? 'Pausado' : 'Rascunho'}
+                        </StatusBadge>
+                      </div>
+                      <p className="text-xs text-dark-500 mt-0.5">
+                        Gatilho: <span className="text-dark-300">{f.trigger}</span>
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0 hidden sm:block">
+                      <p className="text-xs font-bold text-store-400">{f.result}</p>
+                      <p className="text-[10px] text-dark-500 mt-0.5">{f.executions.toLocaleString('pt-BR')} execuções</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <Link to="/automations" className="btn-ghost w-full text-xs">
+                Gerenciar todos os fluxos <ArrowRight className="w-4 h-4" />
+              </Link>
+            </Panel>
+          </div>
+
+          <div className="space-y-6">
+            <Panel title="Jornada padrão de venda" subtitle="Como a IA conduz do “oi” ao “pix enviado”" tone="store" className="rounded-2xl" flush>
+              <ol className="space-y-0">
+                {[
+                  { icon: MessageCircle, t: 'Cliente chega', d: 'resposta em < 2s' },
+                  { icon: Package, t: 'IA apresenta o catálogo', d: 'produto + preço + foto' },
+                  { icon: Send, t: 'Envia orçamento', d: 'com frete e prazo' },
+                  { icon: Wallet, t: 'Link de pagamento', d: 'Pix com vencimento 1h' },
+                  { icon: Sparkles, t: 'Pós-venda', d: 'rastreio + review' },
+                ].map((step, i) => (
+                  <li key={step.t} className="relative flex gap-3 pb-5 last:pb-0">
+                    {i < 4 && <span className="absolute left-[15px] top-8 bottom-0 w-px bg-store-500/30" />}
+                    <span className="w-8 h-8 rounded-full bg-store-500/10 border border-store-500/30 text-store-400 flex items-center justify-center flex-shrink-0 z-10">
+                      <step.icon className="w-4 h-4" />
+                    </span>
+                    <div className="pt-1">
+                      <p className="text-[13px] font-semibold text-dark-100">
+                        <span className="text-store-500 font-bold mr-1.5">{i + 1}.</span>
+                        {step.t}
+                      </p>
+                      <p className="text-[11px] text-dark-500">{step.d}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </Panel>
+
+            <Panel className="rounded-2xl bg-gradient-to-br from-store-500/10 to-transparent border-store-500/20">
+              <div className="flex items-start gap-3">
+                <span className="icon-badge w-10 h-10 bg-store-500 text-white shadow-glow-store">
+                  <Bot className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-semibold text-dark-50">IA de vendas ativa</h3>
+                  <p className="text-xs text-dark-400 mt-1 leading-relaxed">
+                    Responde com tom de vendedor, nunca inventa preço e entrega o caso a um humano quando o cliente pede.
+                  </p>
+                  <Link to="/ai" className="mt-3 text-xs font-semibold text-store-400 inline-flex items-center gap-1 hover:text-store-300">
+                    Ajustar prompts <Settings2 className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+            </Panel>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- INTEGRAÇÃO ---------------- */}
+      {tab === 'integration' && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start animate-fade-in">
+          <Panel title="Evolution API" subtitle="Configuração da Evolution API para WhatsApp" tone="store" className="rounded-2xl">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-dark-300 mb-1.5">API URL</label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  placeholder="https://evolution-api.example.com"
+                  value={evolutionConfig.apiUrl}
+                  onChange={(e) => setEvolutionConfig({...evolutionConfig, apiUrl: e.target.value})}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-300 mb-1.5">API Key</label>
+                <input 
+                  type="password" 
+                  className="input-field" 
+                  placeholder="••••••••••••••••"
+                  value={evolutionConfig.apiKey}
+                  onChange={(e) => setEvolutionConfig({...evolutionConfig, apiKey: e.target.value})}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-300 mb-1.5">Instance Name</label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  placeholder="my-whatsapp-instance"
+                  value={evolutionConfig.instanceName}
+                  onChange={(e) => setEvolutionConfig({...evolutionConfig, instanceName: e.target.value})}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-300 mb-1.5">Phone Number</label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  placeholder="+55 11 99999-0000"
+                  value={evolutionConfig.phoneNumber}
+                  onChange={(e) => setEvolutionConfig({...evolutionConfig, phoneNumber: e.target.value})}
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={handleSaveEvolutionConfig} className="btn-store text-xs flex-1">Salvar configuração</button>
+                <button onClick={handleTestConnection} className="btn-ghost text-xs">Testar conexão</button>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel title="IA do atendimento" subtitle="Quem responde primeiro no caixa" tone="store" className="rounded-2xl">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-dark-300 mb-1.5">Modelo padrão</label>
+                <select className="input-field">
+                  <option>GPT-4o (OpenAI)</option>
+                  <option>Claude Sonnet (Anthropic)</option>
+                  <option>Gemini Pro (Google)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-300 mb-1.5">Comportamento</label>
+                <select className="input-field">
+                  <option>Consultor de vendas (recomendado)</option>
+                  <option>Sempre responder com catálogo</option>
+                  <option>Confirmar antes de ofertar</option>
+                </select>
+              </div>
+              <div className="space-y-2.5">
+                {[
+                  { label: 'Enviar catálogo automaticamente', on: true },
+                  { label: 'Gerar link de pagamento Pix', on: true },
+                  { label: 'Etiquetas automáticas por pedido', on: true },
+                  { label: 'Notificar ausência após 1h', on: false },
+                ].map((opt) => (
+                  <div key={opt.label} className="flex items-center justify-between rounded-lg bg-dark-800/70 border border-dark-700/60 px-3 py-2.5">
+                    <span className="text-[13px] text-dark-200">{opt.label}</span>
+                    <span className={cn('w-9 h-5 rounded-full relative transition-colors', opt.on ? 'bg-store-500' : 'bg-dark-600')}>
+                      <span className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all', opt.on ? 'right-0.5' : 'left-0.5')} />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Panel>
+
+          <div className="space-y-6">
+            <Panel title="Status do canal" className="rounded-2xl" flush>
+              <ul className="space-y-2.5">
+                {[
+                  { label: 'API WhatsApp', state: 'Operacional', ok: true },
+                  { label: 'Webhook', state: 'Último evento há 12s', ok: true },
+                  { label: 'Sincronização de catálogo', state: 'há 5 min', ok: true },
+                  { label: 'Envio de mídia', state: 'Normal', ok: true },
+                  { label: 'Número verificado', state: 'sim', ok: true },
+                ].map((row) => (
+                  <li key={row.label} className="flex items-center justify-between gap-3">
+                    <span className="text-[13px] text-dark-300">{row.label}</span>
+                    <span className="text-xs font-semibold text-store-400 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-store-400" />
+                      {row.state}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+            <Panel className="rounded-2xl !bg-dark-800/50">
+              <div className="flex items-start gap-3">
+                <ChannelChip channel="whatsapp" size="md" />
+                <div>
+                  <h3 className="text-sm font-semibold text-dark-50">Dica da loja</h3>
+                  <p className="text-xs text-dark-400 mt-1 leading-relaxed">
+                    Conecte o catálogo ao fluxo de saudação: clientes que recebem 3+ fotos do produto convertem 2,3× mais.
+                  </p>
+                  <Link to="/catalog" className="mt-2 text-xs font-semibold text-store-400 inline-flex items-center gap-1 hover:text-store-300">
+                    Ver catálogo <ArrowUpRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+            </Panel>
+          </div>
+        </div>
+      )}
+
+      {/* Message History Modal */}
+      {selectedConversation && (
+        <MessageHistory
+          jid={selectedConversation.id || selectedConversation.customer}
+          contactName={selectedConversation.customer}
+          onClose={() => setSelectedConversation(null)}
+        />
+      )}
+    </div>
+  )
+}

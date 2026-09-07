@@ -31,96 +31,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Check current session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchUserProfile(session.user.id)
-      } else {
-        setLoading(false)
-      }
-    })
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        fetchUserProfile(session.user.id)
-      } else {
-        setUser(null)
-        setLoading(false)
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  const fetchUserProfile = async (userId: string) => {
-    const { data } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .single()
-    
-    if (data) {
-      setUser({
-        id: data.id,
-        email: data.email,
-        name: data.name,
-        phone: data.phone,
-        role: data.role
-      })
+    // Check if user is stored in localStorage
+    const storedUser = localStorage.getItem('user')
+    if (storedUser) {
+      setUser(JSON.parse(storedUser))
     }
     setLoading(false)
-  }
+  }, [])
 
   const login = async (phone: string, password: string) => {
-    // Login with phone - need to find user by phone first, then get email for Supabase auth
-    const { data: userData } = await supabase
+    // Login with phone directly from users table
+    const { data, error } = await supabase
       .from('users')
-      .select('email')
+      .select('*')
       .eq('phone', phone)
+      .eq('password_hash', password) // In production: verify hash
       .single()
 
-    if (!userData?.email) {
-      throw new Error('Telefone não encontrado')
+    if (error || !data) {
+      throw new Error('Telefone ou senha inválidos')
     }
 
-    const { error } = await supabase.auth.signInWithPassword({ email: userData.email, password })
-    if (error) throw error
+    setUser({
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      phone: data.phone,
+      role: data.role
+    })
+    localStorage.setItem('user', JSON.stringify(data))
   }
 
   const register = async (data: RegisterData) => {
-    // Generate a fake email for Supabase auth (phone + @variant.app)
+    // Generate fake email for storage
     const fakeEmail = `${data.phone.replace(/\D/g, '')}@variant.app`
     
-    // Create auth user
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: fakeEmail,
-      password: data.password
-    })
+    // Create user profile directly
+    const { data: userData, error } = await supabase
+      .from('users')
+      .insert({
+        email: fakeEmail,
+        password_hash: data.password, // In production: hash password
+        name: data.name,
+        phone: data.phone,
+        role: 'user',
+        status: 'active'
+      })
+      .select()
+      .single()
 
-    if (authError) throw authError
-
-    if (authData.user) {
-      // Create user profile
-      const { error: profileError } = await supabase
-        .from('users')
-        .insert({
-          id: authData.user.id,
-          email: fakeEmail,
-          password_hash: data.password, // Will be replaced with proper hash in production
-          name: data.name,
-          phone: data.phone,
-          role: 'user',
-          status: 'active'
-        })
-
-      if (profileError) throw profileError
+    if (error || !userData) {
+      throw new Error(error?.message || 'Erro ao criar usuário')
     }
   }
 
   const logout = async () => {
-    await supabase.auth.signOut()
     setUser(null)
+    localStorage.removeItem('user')
   }
 
   return (

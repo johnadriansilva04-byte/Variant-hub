@@ -184,6 +184,28 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
       updated_at: new Date().toISOString()
     }))
 
+    const canonicalJids = rows.map(r => r.jid)
+    const legacyToCanonical = new Map<string, string>()
+    for (const jid of canonicalJids) {
+      if (jid.startsWith('55') && jid.endsWith('@s.whatsapp.net')) {
+        legacyToCanonical.set(jid.slice(2), jid)
+      }
+    }
+
+    for (const [legacy, canonical] of legacyToCanonical.entries()) {
+      const { error: reasError } = await supabase
+        .from('whatsapp_messages')
+        .update({ jid: canonical })
+        .eq('jid', legacy)
+      if (reasError) throw reasError
+
+      const { error: delError } = await supabase
+        .from('whatsapp_conversations')
+        .delete()
+        .eq('jid', legacy)
+      if (delError) throw delError
+    }
+
     if (rows.length > 0) {
       const { error: upsertError } = await supabase
         .from('whatsapp_conversations')

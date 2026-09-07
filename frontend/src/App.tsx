@@ -16,8 +16,8 @@ import System from './pages/System/System'
 function App() {
   return (
     <BrowserRouter>
-      <Layout>
-        <Routes>
+      <Routes>
+        <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/whatsapp" element={<WhatsApp />} />
           <Route path="/instagram" element={<Instagram />} />
@@ -30,8 +30,8 @@ function App() {
           <Route path="/catalog" element={<Catalog />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/system" element={<System />} />
-        </Routes>
-      </Layout>
+        </Route>
+      </Routes>
     </BrowserRouter>
   )
 }

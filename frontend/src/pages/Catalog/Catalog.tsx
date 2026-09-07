@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { Plus, Package } from 'lucide-react'
 import PageHeader from '../../components/ui/PageHeader'
 import Panel from '../../components/ui/Panel'

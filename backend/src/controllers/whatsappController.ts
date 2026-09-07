@@ -122,7 +122,14 @@ function normalizeJid(jid: string): string {
   if (trimmed.includes('@g.us') || trimmed.includes('@broadcast') || trimmed.includes('@lid')) {
     return trimmed.replace(/@s\.whatsapp\.net$/, '')
   }
-  return trimmed.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@broadcast$/, '').replace(/@lid$/, '').replace(/[^0-9]/g, '')
+  let clean = trimmed.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@broadcast$/, '').replace(/@lid$/, '').replace(/[^0-9]/g, '')
+  if (clean.length === 13 && clean.startsWith('55')) {
+    clean = clean.slice(2)
+  }
+  if (/^[1-9]{2}\d{8,9}$/.test(clean) && !clean.startsWith('55')) {
+    clean = `55${clean}`
+  }
+  return clean
 }
 
 async function resolveConfig(candidate: any) {

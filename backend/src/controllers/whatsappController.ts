@@ -188,18 +188,20 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
     const legacyToCanonical = new Map<string, string>()
 
     const digitsOf = (jid: string): string => jid.split('@')[0].replace(/[^0-9]/g, '')
-
+    const shortOf = (jid: string): string => { const d = digitsOf(jid); return d.startsWith('55') ? d.slice(2) : d }
     const canonicalize = (jid: string): string | null => {
-      if (!/^\d{10,13}@s\.whatsapp\.net$/.test(jid) && !/^\d{10,13}$/.test(jid)) return null
-      let digits = digitsOf(jid)
-      if (digits.length === 13 && digits.startsWith('55')) {
-        const pair = canonicalJids.find(o => o !== jid && digitsOf(o) === digits.slice(2))
-        if (pair) return digitsOf(pair)
-      }
-      if (digits.length === 12 && digits.startsWith('55')) return digits
-      if (digits.startsWith('55')) digits = digits.slice(2)
-      if (digits.length === 10 || digits.length === 11) return `55${digits}`
-      return null
+      const dig = digitsOf(jid)
+      if (dig.length < 10 || dig.length > 13) return null
+      const ddd = shortOf(jid).slice(0, 2)
+      const tail = shortOf(jid).slice(-6)
+      const cands = canonicalJids.filter(o => {
+        const od = digitsOf(o)
+        if (od.length !== 12 || !od.startsWith('55')) return false
+        const os = shortOf(o)
+        return os.slice(0, 2) === ddd && os.slice(-6) === tail
+      })
+      if (cands.length === 0) return null
+      return cands[0]
     }
 
     for (const jid of canonicalJids) {
@@ -236,6 +238,34 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
       .order('last_message_timestamp', { ascending: false, nullsFirst: false })
 
     if (fetchError) throw fetchError
+    const savedJids = (savedConversations || []).map((c: any) => c.jid)
+    const shortOf2 = (jid: string): string => { const d = jid.split('@')[0].replace(/[^0-9]/g, ''); return d.startsWith('55') ? d.slice(2) : d }
+    const canonOf = (jid: string): string | null => {
+      const dig = jid.split('@')[0].replace(/[^0-9]/g, '')
+      if (dig.length < 10 || dig.length > 13) return null
+      const ddd = shortOf2(jid).slice(0, 2)
+      const tail = shortOf2(jid).slice(-6)
+      const cands = savedJids.filter(o => {
+        const od = o.split('@')[0].replace(/[^0-9]/g, '')
+        if (od.length !== 12 || !od.startsWith('55')) return false
+        const os = shortOf2(o)
+        return os.slice(0, 2) === ddd && os.slice(-6) === tail
+      })
+      if (cands.length === 0) return null
+      return cands[0]
+    }
+
+    const legacyPairs = new Map<string, string>()
+    for (const jid of savedJids) {
+      const canon = canonOf(jid)
+      if (canon && canon !== jid) legacyPairs.set(jid, canon)
+    }
+
+    for (const [legacy, canon] of legacyPairs.entries()) {
+      await supabase.from('whatsapp_messages').update({ jid: canon } ) .eq('jid', legacy)
+      await supabase.from('whatsapp_conversations').delete().eq('jid', legacy)
+    }
+
 
     const conversations = (savedConversations || []).map((chat: any) => ({
       id: chat.jid,

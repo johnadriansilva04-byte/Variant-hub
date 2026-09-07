@@ -8,7 +8,7 @@ import { whatsappService } from '../../services/whatsapp'
 
 type ConnStatus = 'idle' | 'connecting' | 'connected' | 'error'
 
-const POLL_MS = 10000
+
 
 export default function WhatsApp() {
   const { status } = useIntegrationStatus('whatsapp')
@@ -30,6 +30,7 @@ export default function WhatsApp() {
   const [sending, setSending] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [showConfig, setShowConfig] = useState(false)
+  const [activeTab, setActiveTab] = useState<'conversas' | 'contatos' | 'status'>('conversas')
   const cfgRef = useRef(evolutionConfig)
   const selectedChatRef = useRef<string | null>(null)
 
@@ -41,16 +42,18 @@ export default function WhatsApp() {
     selectedChatRef.current = selectedChat
   }, [selectedChat])
 
-  const loadConversations = useCallback(async (config?: any) => {
-    setLoadingConversations(true)
+  const loadConversations = useCallback(async (config?: any, opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoadingConversations(true)
     setErrorMsg('')
     try {
       const result = await whatsappApi.getConversations(config?.apiUrl ? config : undefined)
-      setConversations(result.data || [])
+      const next = result.data || []
+      setConversations(prev => JSON.stringify(prev) === JSON.stringify(next) ? prev : next)
     } catch (error: any) {
       console.error('Error loading conversations:', error)
+      if (!opts.silent) setErrorMsg(error?.message || 'Erro ao carregar conversas')
     } finally {
-      setLoadingConversations(false)
+      if (!opts.silent) setLoadingConversations(false)
     }
   }, [])
 
@@ -63,15 +66,17 @@ export default function WhatsApp() {
     }
   }, [])
 
-  const loadMessages = useCallback(async (jid: string, config?: any) => {
-    setLoadingMessages(true)
+  const loadMessages = useCallback(async (jid: string, config?: any, opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoadingMessages(true)
     try {
       const result = await whatsappApi.getMessages(jid, config?.apiUrl ? config : undefined)
-      setMessages(result.data || [])
+      const next = result.data || []
+      setMessages(prev => JSON.stringify(prev) === JSON.stringify(next) ? prev : next)
     } catch (error: any) {
       console.error('Error loading messages:', error)
+      if (!opts.silent) setErrorMsg(error?.message || 'Erro ao carregar mensagens')
     } finally {
-      setLoadingMessages(false)
+      if (!opts.silent) setLoadingMessages(false)
     }
   }, [])
 
@@ -152,19 +157,39 @@ export default function WhatsApp() {
     })
   }, [])
 
-  // Actualizacao em tempo real (polling)
+  // Actualizacao em tempo real (polling silencioso)
   useEffect(() => {
-    const timer = setInterval(async () => {
-      if (cfgRef.current?.apiUrl && connectionStatus === 'connected') {
-        await loadConversations(cfgRef.current)
-        if (selectedChatRef.current) {
-          await loadMessages(selectedChatRef.current, cfgRef.current)
-        }
-        await loadStats()
+    if (connectionStatus !== 'connected') return
+    const cfg = cfgRef.current
+    if (!cfg?.apiUrl) return
+
+    void loadConversations(cfg, { silent: true })
+    void loadStats()
+
+    const convTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadConversations(cfgRef.current, { silent: true })
+        void loadStats()
       }
-    }, POLL_MS)
-    return () => clearInterval(timer)
-  }, [connectionStatus, loadConversations, loadMessages, loadStats])
+    }, 10000)
+
+    let msgTimer: ReturnType<typeof setInterval> | null = null
+    const currentChat = selectedChatRef.current
+    if (currentChat) {
+      void loadMessages(currentChat, cfgRef.current, { silent: true })
+      msgTimer = setInterval(() => {
+        const chatId = selectedChatRef.current
+        if (chatId && document.visibilityState === 'visible') {
+          void loadMessages(chatId, cfgRef.current, { silent: true })
+        }
+      }, 3000)
+    }
+
+    return () => {
+      clearInterval(convTimer)
+      if (msgTimer) clearInterval(msgTimer)
+    }
+  }, [connectionStatus, loadConversations, loadMessages, loadStats, selectedChat])
 
   const handleChatSelect = (jid: string) => {
     setSelectedChat(jid)
@@ -173,16 +198,28 @@ export default function WhatsApp() {
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedChat || sending) return
+    const text = newMessage.trim()
+    const chatId = selectedChat
     setSending(true)
+    const optimisticMsg = {
+      id: `local-${Date.now()}`,
+      content: text,
+      direction: 'outbound',
+      senderType: 'user',
+      timestamp: new Date().toISOString(),
+      pushName: null
+    }
+    setMessages(prev => [...prev, optimisticMsg])
+    setNewMessage('')
     try {
-      const result = await whatsappApi.sendMessage(selectedChat, newMessage, cfgRef.current.apiUrl ? cfgRef.current : undefined)
+      const result = await whatsappApi.sendMessage(chatId, text, cfgRef.current.apiUrl ? cfgRef.current : undefined)
       console.log('Send result:', result)
-      setNewMessage('')
-      await loadMessages(selectedChat, cfgRef.current)
-      await loadConversations(cfgRef.current)
+      await loadMessages(chatId, cfgRef.current, { silent: true })
+      await loadConversations(cfgRef.current, { silent: true })
     } catch (error: any) {
       setErrorMsg(error?.message || 'Erro ao enviar mensagem')
       console.error('Error sending message:', error)
+      setMessages(prev => prev.filter(m => m.id !== optimisticMsg.id))
     } finally {
       setSending(false)
     }
@@ -213,13 +250,28 @@ export default function WhatsApp() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <header className="flex items-center justify-between px-6 py-3 border-b border-dark-800 bg-dark-900/80 backdrop-blur shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-store-500/20 flex items-center justify-center">
-            <MessageCircle className="w-5 h-5 text-store-400" />
+        <div className="flex flex-col">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-store-500/20 flex items-center justify-center">
+              <MessageCircle className="w-5 h-5 text-store-400" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-dark-100">WhatsApp</h1>
+              <p className="text-xs text-dark-500">Central de atendimento</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-base font-bold text-dark-100">WhatsApp</h1>
-            <p className="text-xs text-dark-500">Central de atendimento</p>
+          <div className="flex items-center gap-1 ml-12 mt-1">
+            {(['conversas', 'contatos', 'status'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-3 py-1 rounded-lg text-xs font-medium capitalize transition-colors ${
+                  activeTab === tab ? 'bg-store-500/15 text-store-300' : 'text-dark-400 hover:text-dark-200 hover:bg-dark-800'
+                }`}
+              >
+                {tab === 'conversas' ? 'Conversas' : tab === 'contatos' ? 'Contatos' : 'Status'}
+              </button>
+            ))}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -261,6 +313,17 @@ export default function WhatsApp() {
         </div>
       )}
 
+      {activeTab === 'contatos' || activeTab === 'status' ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-14 h-14 rounded-2xl bg-dark-800 flex items-center justify-center mx-auto mb-3">
+              {activeTab === 'contatos' ? <MessageCircle className="w-7 h-7 text-dark-500" /> : <Wifi className="w-7 h-7 text-dark-500" />}
+            </div>
+            <h3 className="text-sm font-semibold text-dark-300 capitalize">{activeTab}</h3>
+            <p className="text-xs text-dark-500 mt-1">Este módulo estará disponível em breve.</p>
+          </div>
+        </div>
+      ) : (
       <div className="flex-1 flex overflow-hidden min-h-0">
         <aside className="w-80 border-r border-dark-800 flex flex-col shrink-0">
           <div className="p-3 border-b border-dark-800">
@@ -407,6 +470,7 @@ export default function WhatsApp() {
           </div>
         </aside>
       </div>
+      )}
 
       {showConfig && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowConfig(false)}>

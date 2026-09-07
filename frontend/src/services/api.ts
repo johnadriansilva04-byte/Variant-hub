@@ -1,11 +1,18 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
+export const API_TOKEN = 'variant-hub-demo-token'
+
+function authHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${API_TOKEN}`,
+  }
+}
+
 export const api = {
   async get(endpoint: string) {
     const response = await fetch(`${API_URL}${endpoint}`, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: authHeaders(),
     })
     return response.json()
   },
@@ -13,9 +20,7 @@ export const api = {
   async post(endpoint: string, body: any) {
     const response = await fetch(`${API_URL}${endpoint}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: authHeaders(),
       body: JSON.stringify(body),
     })
     return response.json()
@@ -24,9 +29,7 @@ export const api = {
   async put(endpoint: string, body: any) {
     const response = await fetch(`${API_URL}${endpoint}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: authHeaders(),
       body: JSON.stringify(body),
     })
     return response.json()
@@ -35,9 +38,7 @@ export const api = {
   async delete(endpoint: string) {
     const response = await fetch(`${API_URL}${endpoint}`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: authHeaders(),
     })
     return response.json()
   },
@@ -66,19 +67,27 @@ export const integrationsApi = {
 }
 
 export const whatsappApi = {
+  async getConfig() {
+    return api.get('/whatsapp/config')
+  },
+
+  async saveConfig(config: any) {
+    return api.post('/whatsapp/config', config)
+  },
+
   async getStatus(config: any) {
-    return api.post('/whatsapp/status', config)
+    return api.post('/whatsapp/status', config ?? {})
   },
 
-  async getConversations(config: any) {
-    return api.post('/whatsapp/conversations', config)
+  async getConversations(config?: any) {
+    return api.post('/whatsapp/conversations', { config: config ?? {} })
   },
 
-  async getMessages(jid: string, config: any, limit = 50) {
-    return api.post(`/whatsapp/messages/${jid}`, { ...config, limit })
+  async getMessages(jid: string, config?: any, limit = 50) {
+    return api.post(`/whatsapp/messages/${jid}`, { config: config ?? {}, limit })
   },
 
-  async sendMessage(jid: string, text: string, config: any) {
-    return api.post('/whatsapp/send', { jid, text, ...config })
+  async sendMessage(jid: string, text: string, config?: any) {
+    return api.post('/whatsapp/send', { jid, text, config: config ?? {} })
   },
 }

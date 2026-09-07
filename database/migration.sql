@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS integrations (
     updated_by UUID REFERENCES users(id)
 );
 
+
+-- Garantir colunas adicionais (seguro: IF NOT EXISTS)
+ALTER TABLE integrations ADD COLUMN IF NOT EXISTS connection_status VARCHAR(50) DEFAULT 'unknown';
+ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_check TIMESTAMP WITH TIME ZONE;
+ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_sync TIMESTAMP WITH TIME ZONE;
+ALTER TABLE integrations ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE integrations ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE integrations ADD COLUMN IF NOT EXISTS webhook_url TEXT;
 CREATE INDEX IF NOT EXISTS idx_integrations_type ON integrations(type);
 CREATE INDEX IF NOT EXISTS idx_integrations_status ON integrations(status);
 CREATE INDEX IF NOT EXISTS idx_integrations_connection_status ON integrations(connection_status);
@@ -264,3 +272,11 @@ CREATE TRIGGER update_channel_stats_updated_at BEFORE UPDATE ON channel_stats
 DROP TRIGGER IF EXISTS update_orders_updated_at ON orders;
 CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================
+-- USUARIO ADMIN PADRAO
+-- (A senha NAO e verificada nesta versao do login; basta o email existir no banco.)
+-- ============================================
+INSERT INTO users (email, password_hash, name, role, status)
+VALUES ('admin@variant.app', 'demo-password-hash', 'Admin Variant Hub', 'admin', 'active')
+ON CONFLICT (email) DO NOTHING;

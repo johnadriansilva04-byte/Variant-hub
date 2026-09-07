@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_TOKEN } from '../services/api'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
@@ -12,6 +13,7 @@ export function useIntegrationStatus(type: string) {
         const response = await fetch(`${API_URL}/health/${type}`, {
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${API_TOKEN}`,
           },
         })
         const data = await response.json()

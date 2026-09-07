@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Send, RefreshCw, MessageCircle, ArrowLeft } from 'lucide-react'
 import PageHeader from '../../components/ui/PageHeader'
 import Panel from '../../components/ui/Panel'
@@ -13,7 +13,8 @@ export default function WhatsApp() {
   const [evolutionConfig, setEvolutionConfig] = useState({
     apiUrl: '',
     apiKey: '',
-    instanceName: ''
+    instanceName: '',
+    phone: ''
   })
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
   const [selectedChat, setSelectedChat] = useState<string | null>(null)
@@ -21,6 +22,45 @@ export default function WhatsApp() {
   const [messages, setMessages] = useState<any[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [stats, setStats] = useState({ activeConversations: 0, uniqueContacts: 0, messagesReceived: 0, messagesSent: 0 })
+  const [saved, setSaved] = useState(false)
+
+  const loadSavedConfig = async () => {
+    try {
+      const result = await whatsappApi.getConfig()
+      const cfg = result.data
+      if (cfg?.apiUrl || cfg?.instanceName) {
+        setEvolutionConfig({
+          apiUrl: cfg.apiUrl || '',
+          apiKey: cfg.apiKey || '',
+          instanceName: cfg.instanceName || '',
+          phone: cfg.phone || ''
+        })
+        setSaved(true)
+      }
+    } catch (error) {
+      console.error('Error loading saved config:', error)
+    }
+  }
+
+  const saveConfig = async () => {
+    setConnectionStatus('connecting')
+    try {
+      const result = await whatsappApi.saveConfig(evolutionConfig)
+      if (result.success) {
+        setSaved(true)
+        const statusResult = await whatsappApi.getStatus(evolutionConfig)
+        if (statusResult.data?.connected) {
+          setConnectionStatus('connected')
+        } else {
+          setConnectionStatus('error')
+        }
+      } else {
+        setConnectionStatus('error')
+      }
+    } catch (error) {
+      setConnectionStatus('error')
+    }
+  }
 
   const testConnection = async () => {
     setConnectionStatus('connecting')
@@ -40,7 +80,7 @@ export default function WhatsApp() {
 
   const loadConversations = async () => {
     try {
-      const result = await whatsappApi.getConversations(evolutionConfig)
+      const result = await whatsappApi.getConversations(evolutionConfig.apiUrl ? evolutionConfig : undefined)
       setConversations(result.data || [])
     } catch (error) {
       console.error('Error loading conversations:', error)
@@ -58,7 +98,7 @@ export default function WhatsApp() {
 
   const loadMessages = async (jid: string) => {
     try {
-      const result = await whatsappApi.getMessages(jid, evolutionConfig)
+      const result = await whatsappApi.getMessages(jid, evolutionConfig.apiUrl ? evolutionConfig : undefined)
       setMessages(result.data || [])
     } catch (error) {
       console.error('Error loading messages:', error)
@@ -68,13 +108,18 @@ export default function WhatsApp() {
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedChat) return
     try {
-      await whatsappApi.sendMessage(selectedChat, newMessage, evolutionConfig)
+      const result = await whatsappApi.sendMessage(selectedChat, newMessage, evolutionConfig.apiUrl ? evolutionConfig : undefined)
+      console.log('Send result:', result)
       setNewMessage('')
       await loadMessages(selectedChat)
     } catch (error) {
       console.error('Error sending message:', error)
     }
   }
+
+  useEffect(() => {
+    loadSavedConfig()
+  }, [])
 
   const handleChatSelect = (jid: string) => {
     setSelectedChat(jid)
@@ -125,24 +170,45 @@ export default function WhatsApp() {
               className="input"
               value={evolutionConfig.instanceName}
               onChange={(e) => setEvolutionConfig({ ...evolutionConfig, instanceName: e.target.value })}
-              placeholder="Ex: minha-instancia"
+              placeholder="Ex: Variante"
             />
           </div>
-          <button
-            onClick={testConnection}
-            disabled={connectionStatus === 'connecting'}
-            className="btn-store text-xs"
-          >
-            {connectionStatus === 'connecting' ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" /> Conectando...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-4 h-4" /> Testar conexão
-              </>
-            )}
-          </button>
+          <div>
+            <label htmlFor="phone" className="block text-xs font-medium text-dark-300">Telefone (WhatsApp)</label>
+            <input
+              type="text"
+              id="phone"
+              className="input"
+              value={evolutionConfig.phone}
+              onChange={(e) => setEvolutionConfig({ ...evolutionConfig, phone: e.target.value })}
+              placeholder="Ex: 48999880030"
+            />
+            <p className="text-[10px] text-dark-500 mt-1">Número do WhatsApp (para identificar suas próprias mensagens). Use só dígitos com DDI (ex:  48999880030).</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={saveConfig}
+              disabled={connectionStatus === 'connecting'}
+              className="btn-store text-xs"
+            >
+              {saved ? 'Salvo ✓' : 'Salvar configuração'}
+            </button>
+            <button
+              onClick={testConnection}
+              disabled={connectionStatus === 'connecting'}
+              className="btn-store text-xs"
+            >
+              {connectionStatus === 'connecting' ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Conectando...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" /> Testar conexão
+                </>
+              )}
+            </button>
+          </div>
         </div>
         <div className="mt-4">
           <StatusBadge tone={status === 'online' ? 'green' : 'red'}>

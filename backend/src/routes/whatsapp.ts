@@ -4,6 +4,8 @@ import * as whatsappController from '../controllers/whatsappController'
 
 const router = Router()
 
+router.get('/config', authenticate, whatsappController.getWhatsAppConfig)
+router.post('/config', authenticate, whatsappController.saveWhatsAppConfig)
 router.post('/status', authenticate, whatsappController.getWhatsAppStatus)
 router.post('/conversations', authenticate, whatsappController.getWhatsAppConversations)
 router.post('/messages/:jid', authenticate, whatsappController.getWhatsAppMessages)

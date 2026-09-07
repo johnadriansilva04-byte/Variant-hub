@@ -1,5 +1,4 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { supabase } from '../lib/supabase'
 
 interface User {
   id: string
@@ -24,6 +23,8 @@ interface RegisterData {
   phone: string
 }
 
+const API_URL = import.meta.env.VITE_API_URL || '/api'
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -40,48 +41,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (phone: string, password: string) => {
-    // Login with phone directly from users table
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('phone', phone)
-      .eq('password_hash', password) // In production: verify hash
-      .single()
-
-    if (error || !data) {
-      throw new Error('Telefone ou senha inválidos')
+    const response = await fetch(`${API_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, password })
+    })
+    const result = await response.json()
+    
+    if (!result.success) {
+      throw new Error(result.message || 'Telefone ou senha inválidos')
     }
 
-    setUser({
-      id: data.id,
-      email: data.email,
-      name: data.name,
-      phone: data.phone,
-      role: data.role
-    })
-    localStorage.setItem('user', JSON.stringify(data))
+    setUser(result.data)
+    localStorage.setItem('user', JSON.stringify(result.data))
   }
 
   const register = async (data: RegisterData) => {
-    // Generate fake email for storage
-    const fakeEmail = `${data.phone.replace(/\D/g, '')}@variant.app`
+    const response = await fetch(`${API_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    const result = await response.json()
     
-    // Create user profile directly
-    const { data: userData, error } = await supabase
-      .from('users')
-      .insert({
-        email: fakeEmail,
-        password_hash: data.password, // In production: hash password
-        name: data.name,
-        phone: data.phone,
-        role: 'user',
-        status: 'active'
-      })
-      .select()
-      .single()
-
-    if (error || !userData) {
-      throw new Error(error?.message || 'Erro ao criar usuário')
+    if (!result.success) {
+      throw new Error(result.message || 'Erro ao criar usuário')
     }
   }
 

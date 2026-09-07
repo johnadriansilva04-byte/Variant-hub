@@ -1,5 +1,7 @@
 import axios from 'axios'
 
+const ENV_API_URL = process.env.EVOLUTION_API_URL
+
 export interface EvolutionApiConfig {
   apiUrl: string
   apiKey: string
@@ -49,7 +51,7 @@ class EvolutionApiService {
     if (!this.config) {
       throw new Error('Evolution API not configured')
     }
-    return this.config.apiUrl
+    return ENV_API_URL || this.config.apiUrl
   }
 
   private get headers(): Record<string, string> {

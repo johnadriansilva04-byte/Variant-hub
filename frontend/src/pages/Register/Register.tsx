@@ -4,23 +4,28 @@ import { useAuth } from '../../contexts/AuthContext'
 
 export default function Register() {
   const navigate = useNavigate()
-  const { register } = useAuth()
+  const { register, login } = useAuth()
   const [formData, setFormData] = useState({
     password: '',
     name: '',
     phone: ''
   })
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setSuccess('')
     setLoading(true)
 
     try {
       await register(formData)
-      navigate('/login')
+      setSuccess('Conta criada com sucesso! Fazendo login...')
+      // Auto login after successful registration
+      await login(formData.phone, formData.password)
+      navigate('/')
     } catch (err: any) {
       setError(err.message || 'Erro ao criar conta')
     } finally {
@@ -36,6 +41,12 @@ export default function Register() {
         {error && (
           <div className="bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded mb-4">
             {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="bg-green-900 border border-green-700 text-green-100 px-4 py-3 rounded mb-4">
+            {success}
           </div>
         )}
 

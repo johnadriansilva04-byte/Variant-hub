@@ -6,7 +6,6 @@ export default function Register() {
   const navigate = useNavigate()
   const { register } = useAuth()
   const [formData, setFormData] = useState({
-    email: '',
     password: '',
     name: '',
     phone: ''
@@ -66,20 +65,6 @@ export default function Register() {
               onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
               className="w-full px-3 py-2 border border-gray-600 bg-gray-700 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="(11) 99999-9999"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Email
-            </label>
-            <input
-              type="email"
-              required
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-600 bg-gray-700 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="seu@email.com"
             />
           </div>
 

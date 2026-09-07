@@ -6,7 +6,7 @@ export default function Login() {
   const navigate = useNavigate()
   const { login } = useAuth()
   const [formData, setFormData] = useState({
-    email: '',
+    phone: '',
     password: ''
   })
   const [error, setError] = useState('')
@@ -18,7 +18,7 @@ export default function Login() {
     setLoading(true)
 
     try {
-      await login(formData.email, formData.password)
+      await login(formData.phone, formData.password)
       navigate('/')
     } catch (err: any) {
       setError(err.message || 'Credenciais inválidas')
@@ -41,15 +41,15 @@ export default function Login() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              Email
+              Telefone
             </label>
             <input
-              type="email"
+              type="tel"
               required
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
               className="w-full px-3 py-2 border border-gray-600 bg-gray-700 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="seu@email.com"
+              placeholder="(11) 99999-9999"
             />
           </div>
 

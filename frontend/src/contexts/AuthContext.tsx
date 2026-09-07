@@ -12,14 +12,13 @@ interface User {
 interface AuthContextType {
   user: User | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (phone: string, password: string) => Promise<void>
   register: (data: RegisterData) => Promise<void>
   logout: () => Promise<void>
   isAuthenticated: boolean
 }
 
 interface RegisterData {
-  email: string
   password: string
   name: string
   phone: string
@@ -73,15 +72,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false)
   }
 
-  const login = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+  const login = async (phone: string, password: string) => {
+    // Login with phone - need to find user by phone first, then get email for Supabase auth
+    const { data: userData } = await supabase
+      .from('users')
+      .select('email')
+      .eq('phone', phone)
+      .single()
+
+    if (!userData?.email) {
+      throw new Error('Telefone não encontrado')
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({ email: userData.email, password })
     if (error) throw error
   }
 
   const register = async (data: RegisterData) => {
+    // Generate a fake email for Supabase auth (phone + @variant.app)
+    const fakeEmail = `${data.phone.replace(/\D/g, '')}@variant.app`
+    
     // Create auth user
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: data.email,
+      email: fakeEmail,
       password: data.password
     })
 
@@ -93,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .from('users')
         .insert({
           id: authData.user.id,
-          email: data.email,
+          email: fakeEmail,
           password_hash: data.password, // Will be replaced with proper hash in production
           name: data.name,
           phone: data.phone,

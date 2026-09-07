@@ -5,16 +5,16 @@ import { createError } from '../middleware/errorHandler'
 
 export async function login(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const { email, password } = req.body
+    const { phone, password } = req.body
 
-    if (!email || !password) {
-      throw createError('Email e senha são obrigatórios', 400)
+    if (!phone || !password) {
+      throw createError('Telefone e senha são obrigatórios', 400)
     }
 
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .eq('email', email)
+      .eq('phone', phone)
       .single()
 
     if (error || !data) {
@@ -29,6 +29,7 @@ export async function login(req: AuthRequest, res: Response, next: NextFunction)
         id: data.id,
         email: data.email,
         name: data.name,
+        phone: data.phone,
         role: data.role
       }
     })
@@ -39,22 +40,14 @@ export async function login(req: AuthRequest, res: Response, next: NextFunction)
 
 export async function register(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const { email, password, name, phone } = req.body
+    const { password, name, phone } = req.body
 
-    if (!email || !password || !name || !phone) {
-      throw createError('Email, senha, nome e telefone são obrigatórios', 400)
+    if (!password || !name || !phone) {
+      throw createError('Senha, nome e telefone são obrigatórios', 400)
     }
 
-    // Check if email already exists
-    const { data: existingEmail } = await supabase
-      .from('users')
-      .select('email')
-      .eq('email', email)
-      .single()
-
-    if (existingEmail) {
-      throw createError('Email já cadastrado', 400)
-    }
+    // Generate fake email for Supabase auth
+    const fakeEmail = `${phone.replace(/\D/g, '')}@variant.app`
 
     // Check if phone already exists
     const { data: existingPhone } = await supabase
@@ -71,7 +64,7 @@ export async function register(req: AuthRequest, res: Response, next: NextFuncti
     const { data, error } = await supabase
       .from('users')
       .insert({
-        email,
+        email: fakeEmail,
         password_hash: password, // In production: hash password
         name,
         phone,

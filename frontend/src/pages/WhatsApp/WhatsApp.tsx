@@ -1,7 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Send, RefreshCw, MessageCircle, ArrowLeft, Wifi, WifiOff, Loader2 } from 'lucide-react'
-import PageHeader from '../../components/ui/PageHeader'
-import Panel from '../../components/ui/Panel'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Send, RefreshCw, MessageCircle, ArrowLeft, Wifi, WifiOff, Loader2, Settings, X, Info } from 'lucide-react'
 import StatusBadge from '../../components/ui/StatusBadge'
 import Stat from '../../components/ui/Stat'
 import { useIntegrationStatus } from '../../hooks/useIntegrationStatus'
@@ -9,6 +7,8 @@ import { whatsappApi } from '../../services/api'
 import { whatsappService } from '../../services/whatsapp'
 
 type ConnStatus = 'idle' | 'connecting' | 'connected' | 'error'
+
+const POLL_MS = 10000
 
 export default function WhatsApp() {
   const { status } = useIntegrationStatus('whatsapp')
@@ -29,6 +29,17 @@ export default function WhatsApp() {
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [sending, setSending] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const [showConfig, setShowConfig] = useState(false)
+  const cfgRef = useRef(evolutionConfig)
+  const selectedChatRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    cfgRef.current = evolutionConfig
+  }, [evolutionConfig])
+
+  useEffect(() => {
+    selectedChatRef.current = selectedChat
+  }, [selectedChat])
 
   const loadConversations = useCallback(async (config?: any) => {
     setLoadingConversations(true)
@@ -37,7 +48,6 @@ export default function WhatsApp() {
       const result = await whatsappApi.getConversations(config?.apiUrl ? config : undefined)
       setConversations(result.data || [])
     } catch (error: any) {
-      setErrorMsg(error?.message || 'Erro ao carregar conversas')
       console.error('Error loading conversations:', error)
     } finally {
       setLoadingConversations(false)
@@ -59,7 +69,6 @@ export default function WhatsApp() {
       const result = await whatsappApi.getMessages(jid, config?.apiUrl ? config : undefined)
       setMessages(result.data || [])
     } catch (error: any) {
-      setErrorMsg(error?.message || 'Erro ao carregar mensagens')
       console.error('Error loading messages:', error)
     } finally {
       setLoadingMessages(false)
@@ -87,7 +96,7 @@ export default function WhatsApp() {
   }
 
   const testConnection = async (config?: any) => {
-    const cfg = config || evolutionConfig
+    const cfg = config || cfgRef.current
     if (!cfg.apiUrl || !cfg.apiKey || !cfg.instanceName) {
       setConnectionStatus('error')
       setErrorMsg('Preencha URL, API Key e nome da instância')
@@ -122,6 +131,7 @@ export default function WhatsApp() {
       const result = await whatsappApi.saveConfig(evolutionConfig)
       if (result.success) {
         setSaved(true)
+        setShowConfig(false)
         const ok = await testConnection(evolutionConfig)
         if (!ok) setConnectionStatus('error')
       } else {
@@ -142,20 +152,34 @@ export default function WhatsApp() {
     })
   }, [])
 
+  // Actualizacao em tempo real (polling)
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      if (cfgRef.current?.apiUrl && connectionStatus === 'connected') {
+        await loadConversations(cfgRef.current)
+        if (selectedChatRef.current) {
+          await loadMessages(selectedChatRef.current, cfgRef.current)
+        }
+        await loadStats()
+      }
+    }, POLL_MS)
+    return () => clearInterval(timer)
+  }, [connectionStatus, loadConversations, loadMessages, loadStats])
+
   const handleChatSelect = (jid: string) => {
     setSelectedChat(jid)
-    loadMessages(jid, evolutionConfig)
+    loadMessages(jid, cfgRef.current)
   }
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedChat || sending) return
     setSending(true)
     try {
-      const result = await whatsappApi.sendMessage(selectedChat, newMessage, evolutionConfig.apiUrl ? evolutionConfig : undefined)
+      const result = await whatsappApi.sendMessage(selectedChat, newMessage, cfgRef.current.apiUrl ? cfgRef.current : undefined)
       console.log('Send result:', result)
       setNewMessage('')
-      await loadMessages(selectedChat, evolutionConfig)
-      await loadConversations(evolutionConfig)
+      await loadMessages(selectedChat, cfgRef.current)
+      await loadConversations(cfgRef.current)
     } catch (error: any) {
       setErrorMsg(error?.message || 'Erro ao enviar mensagem')
       console.error('Error sending message:', error)
@@ -187,187 +211,131 @@ export default function WhatsApp() {
   const onlineTone = status === 'online' ? ('green' as const) : ('red' as const)
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <PageHeader
-        zone="store"
-        zoneLabel="LOJA · WhatsApp"
-        title="Atendimento WhatsApp"
-        description="Conecte com a Evolution API e gerencie todas as conversas em um único lugar."
-      />
-
-      <Panel title="Configuração da Evolution API" className="rounded-2xl">
-        <p className="text-sm text-dark-400 mb-4">
-          Insira os dados da sua instância da Evolution API para conectar o WhatsApp.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="apiUrl" className="block text-xs font-medium text-dark-300">URL da API</label>
-            <input
-              type="text"
-              id="apiUrl"
-              className="input"
-              value={evolutionConfig.apiUrl}
-              onChange={(e) => setEvolutionConfig({ ...evolutionConfig, apiUrl: e.target.value })}
-              placeholder="Ex: https://api.pracinha.online"
-            />
+    <div className="flex flex-col h-screen overflow-hidden">
+      <header className="flex items-center justify-between px-6 py-3 border-b border-dark-800 bg-dark-900/80 backdrop-blur shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-store-500/20 flex items-center justify-center">
+            <MessageCircle className="w-5 h-5 text-store-400" />
           </div>
           <div>
-            <label htmlFor="apiKey" className="block text-xs font-medium text-dark-300">API Key</label>
-            <input
-              type="text"
-              id="apiKey"
-              className="input"
-              value={evolutionConfig.apiKey}
-              onChange={(e) => setEvolutionConfig({ ...evolutionConfig, apiKey: e.target.value })}
-              placeholder="Sua chave de API"
-            />
-          </div>
-          <div>
-            <label htmlFor="instanceName" className="block text-xs font-medium text-dark-300">Nome da Instância</label>
-            <input
-              type="text"
-              id="instanceName"
-              className="input"
-              value={evolutionConfig.instanceName}
-              onChange={(e) => setEvolutionConfig({ ...evolutionConfig, instanceName: e.target.value })}
-              placeholder="Ex: Variante"
-            />
-          </div>
-          <div>
-            <label htmlFor="phone" className="block text-xs font-medium text-dark-300">Telefone (WhatsApp)</label>
-            <input
-              type="text"
-              id="phone"
-              className="input"
-              value={evolutionConfig.phone}
-              onChange={(e) => setEvolutionConfig({ ...evolutionConfig, phone: e.target.value })}
-              placeholder="Ex: 48999880030"
-            />
-            <p className="text-[10px] text-dark-500 mt-1">Número do WhatsApp (só dígitos com DDI). Use para identificar suas próprias mensagens.</p>
+            <h1 className="text-base font-bold text-dark-100">WhatsApp</h1>
+            <p className="text-xs text-dark-500">Central de atendimento</p>
           </div>
         </div>
-
-        <div className="flex flex-wrap items-center gap-3 mt-4">
-          <button
-            onClick={saveConfig}
-            disabled={connectionStatus === 'connecting'}
-            className="btn-store text-xs"
-          >
-            {saved ? 'Salvo ✓' : 'Salvar configuração'}
-          </button>
+        <div className="flex items-center gap-2">
+          <StatusBadge tone={onlineTone}>
+            <span className="flex items-center gap-1">
+              {status === 'online' ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+              API: {status === 'online' ? 'online' : 'offline'}
+            </span>
+          </StatusBadge>
+          <StatusBadge tone={connectionTone}>
+            <span className="flex items-center gap-1">
+              {connectionStatus === 'connected' ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+              {connectionStatusLabel}
+            </span>
+          </StatusBadge>
           <button
             onClick={() => testConnection()}
             disabled={connectionStatus === 'connecting'}
-            className="btn-store text-xs"
+            className="bg-dark-800 hover:bg-dark-700 border border-dark-700 text-dark-200 text-xs px-3 py-2 rounded-lg flex items-center gap-2"
+            title="Atualizar agora"
           >
-            {connectionStatus === 'connecting' ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" /> Conectando...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-4 h-4" /> Testar conexão
-              </>
-            )}
+            {connectionStatus === 'connecting' ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            Atualizar
           </button>
           <button
-            onClick={() => { setConnectionStatus('connecting'); void testConnection() }}
-            disabled={connectionStatus === 'connecting'}
+            onClick={() => setShowConfig(true)}
             className="bg-dark-800 hover:bg-dark-700 border border-dark-700 text-dark-200 text-xs px-3 py-2 rounded-lg flex items-center gap-2"
           >
-            <RefreshCw className="w-4 h-4" /> Atualizar conversas
+            <Settings className="w-4 h-4" />
+            Configurações
           </button>
-          <div className="flex items-center gap-2 ml-auto">
-            <StatusBadge tone={connectionTone}>
-              <span className="flex items-center gap-1">
-                {connectionStatus === 'connected' ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-                {connectionStatusLabel}
-              </span>
-            </StatusBadge>
-            <StatusBadge tone={onlineTone}>
-              API: {status === 'online' ? 'online' : 'offline'}
-            </StatusBadge>
-          </div>
         </div>
+      </header>
 
-        {errorMsg && (
-          <div className="mt-3 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-            {errorMsg}
+      {errorMsg && (
+        <div className="bg-red-500/15 border-b border-red-500/20 text-red-300 text-xs px-6 py-2 flex items-center gap-2 shrink-0">
+          <Info className="w-3 h-3" />
+          {errorMsg}
+        </div>
+      )}
+
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        <aside className="w-80 border-r border-dark-800 flex flex-col shrink-0">
+          <div className="p-3 border-b border-dark-800">
+            <h2 className="text-xs font-semibold text-dark-400 uppercase tracking-wider">
+              Conversas ({conversations.length})
+            </h2>
           </div>
-        )}
-      </Panel>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Stat label="Conversas ativas" value={stats.activeConversations.toString()} tone="store" sub="agora" />
-        <Stat label="Contatos únicos" value={stats.uniqueContacts.toString()} tone="store" sub="total" />
-        <Stat label="Mensagens recebidas" value={stats.messagesReceived.toString()} tone="store" sub="hoje" />
-        <Stat label="Mensagens enviadas" value={stats.messagesSent.toString()} tone="store" sub="hoje" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
-        <Panel title={`Conversas (${conversations.length})`} className="rounded-2xl h-full overflow-hidden">
-          <div className="h-full overflow-y-auto scrollbar-thin">
+          <div className="flex-1 overflow-y-auto scrollbar-thin">
             {loadingConversations ? (
               <div className="flex items-center justify-center py-10 text-dark-400">
                 <Loader2 className="w-5 h-5 animate-spin" />
               </div>
             ) : conversations.length === 0 ? (
-              <div className="text-center py-8">
-                <MessageCircle className="w-8 h-8 text-dark-600 mx-auto mb-2" />
+              <div className="text-center py-10">
                 <p className="text-sm text-dark-400">Nenhuma conversa</p>
-                <p className="text-xs text-dark-500 mt-1">Clique em "Testar conexão" para carregar</p>
+                <p className="text-xs text-dark-500 mt-1">Clique em "Atualizar" para carregar</p>
               </div>
             ) : (
-              <div className="space-y-1">
-                {conversations.map((conv) => (
-                  <button
-                    key={conv.id}
-                    onClick={() => handleChatSelect(conv.id)}
-                    className={`w-full text-left p-3 rounded-lg transition-colors ${
-                      selectedChat === conv.id ? 'bg-dark-800 border border-dark-700' : 'hover:bg-dark-800/50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-dark-800 text-dark-300 text-xs font-bold flex items-center justify-center shrink-0">
-                        {conv.initials}
-                      </div>
-                      <div className="flex-1 min-w-0">
+              conversations.map((conv) => (
+                <button
+                  key={conv.id}
+                  onClick={() => handleChatSelect(conv.id)}
+                  className={`w-full text-left p-3 border-b border-dark-800/60 transition-colors ${
+                    selectedChat === conv.id ? 'bg-dark-800' : 'hover:bg-dark-800/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-dark-800 text-dark-300 text-xs font-bold flex items-center justify-center shrink-0">
+                      {conv.initials}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-medium text-dark-200 truncate">{conv.customer}</p>
-                        <p className="text-xs text-dark-500 truncate">{conv.context}</p>
                       </div>
+                      <p className="text-xs text-dark-500 truncate">{conv.context}</p>
                       {conv.lastActivity !== '—' && (
-                        <span className="text-[10px] text-dark-500 shrink-0">{conv.lastActivity}</span>
+                        <p className="text-[10px] text-dark-600 mt-0.5">{conv.lastActivity}</p>
                       )}
                     </div>
-                  </button>
-                ))}
-              </div>
+                  </div>
+                </button>
+              ))
             )}
           </div>
-        </Panel>
+        </aside>
 
-        <Panel title={selectedChat ? 'Conversa' : 'Selecione uma conversa'} className="lg:col-span-2 rounded-2xl h-full overflow-hidden">
+        <section className="flex-1 flex flex-col min-w-0 bg-dark-950/60">
           {selectedChat ? (
-            <div className="flex flex-col h-full">
-              <div className="flex items-center gap-3 p-4 border-b border-dark-800">
-                <button onClick={() => setSelectedChat(null)} className="p-2 rounded-lg hover:bg-dark-800 text-dark-400">
-                  <ArrowLeft className="w-5 h-5" />
+            <>
+              <div className="flex items-center gap-3 p-3 border-b border-dark-800 bg-dark-900/60 shrink-0">
+                <button onClick={() => setSelectedChat(null)} className="p-1.5 rounded-lg hover:bg-dark-800 text-dark-400">
+                  <ArrowLeft className="w-4 h-4" />
                 </button>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-dark-200 truncate">
                     {conversations.find(c => c.id === selectedChat)?.customer}
                   </p>
-                  <p className="text-xs text-dark-500">WhatsApp</p>
+                  <p className="text-[10px] text-dark-500">WhatsApp</p>
                 </div>
+                <button
+                  onClick={() => { loadMessages(selectedChat, cfgRef.current); loadConversations(cfgRef.current) }}
+                  className="p-2 rounded-lg hover:bg-dark-800 text-dark-400"
+                  title="Recarregar mensagens"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-3 bg-dark-950/30">
+              <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-3 min-h-0">
                 {loadingMessages ? (
                   <div className="flex items-center justify-center py-10 text-dark-400">
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <Loader2 className="w-6 h-6 animate-spin" />
                   </div>
                 ) : messages.length === 0 ? (
-                  <div className="text-center py-8">
+                  <div className="text-center py-10">
                     <p className="text-sm text-dark-400">Nenhuma mensagem</p>
                     <p className="text-xs text-dark-500 mt-1">Envie a primeira mensagem ou aguarde o cliente</p>
                   </div>
@@ -396,7 +364,7 @@ export default function WhatsApp() {
                 )}
               </div>
 
-              <div className="p-4 border-t border-dark-800">
+              <div className="p-3 border-t border-dark-800 bg-dark-900/60 shrink-0">
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -404,7 +372,7 @@ export default function WhatsApp() {
                     onChange={(e) => setNewMessage(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
                     placeholder="Digite sua mensagem..."
-                    className="flex-1 bg-dark-800 border border-dark-700 rounded-lg px-4 py-2 text-sm text-dark-200 focus:outline-none focus:border-dark-600"
+                    className="flex-1 bg-dark-800 border border-dark-700 rounded-lg px-4 py-2.5 text-sm text-dark-200 placeholder-dark-500 focus:outline-none focus:border-store-500"
                   />
                   <button
                     onClick={sendMessage}
@@ -415,17 +383,106 @@ export default function WhatsApp() {
                   </button>
                 </div>
               </div>
-            </div>
+            </>
           ) : (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
-                <MessageCircle className="w-12 h-12 text-dark-600 mx-auto mb-3" />
+                <MessageCircle className="w-14 h-14 text-dark-600 mx-auto mb-3" />
                 <p className="text-sm text-dark-400">Selecione uma conversa para começar</p>
+                <p className="text-xs text-dark-500 mt-1">As conversas atualizam automaticamente</p>
               </div>
             </div>
           )}
-        </Panel>
+        </section>
+
+        <aside className="w-52 border-l border-dark-800 hidden xl:flex flex-col overflow-y-auto scrollbar-thin shrink-0">
+          <div className="p-3 border-b border-dark-800">
+            <h2 className="text-xs font-semibold text-dark-400 uppercase tracking-wider">Operação</h2>
+          </div>
+          <div className="p-3 space-y-3">
+            <Stat label="Conversas ativas" value={stats.activeConversations.toString()} tone="store" sub="agora" />
+            <Stat label="Contatos únicos" value={stats.uniqueContacts.toString()} tone="store" sub="total" />
+            <Stat label="Mensagens recebidas" value={stats.messagesReceived.toString()} tone="store" sub="hoje" />
+            <Stat label="Mensagens enviadas" value={stats.messagesSent.toString()} tone="store" sub="hoje" />
+          </div>
+        </aside>
       </div>
+
+      {showConfig && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowConfig(false)}>
+          <div
+            className="bg-dark-900 border border-dark-700 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-dark-800">
+              <h2 className="text-sm font-semibold text-dark-200">Configuração da Evolution API</h2>
+              <button onClick={() => setShowConfig(false)} className="p-1.5 rounded-lg hover:bg-dark-800 text-dark-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-dark-300 mb-1">URL da API</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={evolutionConfig.apiUrl}
+                  onChange={(e) => setEvolutionConfig({ ...evolutionConfig, apiUrl: e.target.value })}
+                  placeholder="Ex: https://api.pracinha.online"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-dark-300 mb-1">API Key</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={evolutionConfig.apiKey}
+                  onChange={(e) => setEvolutionConfig({ ...evolutionConfig, apiKey: e.target.value })}
+                  placeholder="Sua chave de API"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-dark-300 mb-1">Nome da Instância</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={evolutionConfig.instanceName}
+                  onChange={(e) => setEvolutionConfig({ ...evolutionConfig, instanceName: e.target.value })}
+                  placeholder="Ex: Variante"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-dark-300 mb-1">Telefone (WhatsApp)</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={evolutionConfig.phone}
+                  onChange={(e) => setEvolutionConfig({ ...evolutionConfig, phone: e.target.value })}
+                  placeholder="Ex: 48999880030"
+                />
+                <p className="text-[10px] text-dark-500 mt-1">Número do WhatsApp para identificar suas mensagens.</p>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={saveConfig}
+                  disabled={connectionStatus === 'connecting'}
+                  className="btn-store text-xs"
+                >
+                  {saved ? 'Salvo ✓' : 'Salvar configuração'}
+                </button>
+                <button
+                  onClick={() => testConnection()}
+                  disabled={connectionStatus === 'connecting'}
+                  className="bg-dark-800 hover:bg-dark-700 border border-dark-700 text-dark-200 text-xs px-3 py-2 rounded-lg flex items-center gap-2"
+                >
+                  {connectionStatus === 'connecting' ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Testar conexão
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

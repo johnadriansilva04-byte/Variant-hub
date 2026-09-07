@@ -21,7 +21,7 @@ export default function Orders() {
         zone="store"
         zoneLabel="LOJA · Pedidos"
         title="Pedidos"
-        description="Do "fechou" no WhatsApp até a entrega: pagamento, separação, envio e pós-venda num único lugar."
+        description="Do 'fechou' no WhatsApp até a entrega: pagamento, separação, envio e pós-venda num único lugar."
         actions={
           <>
             <button className="btn-store text-xs">

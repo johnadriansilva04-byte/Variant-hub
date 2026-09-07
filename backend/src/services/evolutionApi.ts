@@ -7,7 +7,13 @@ function normalizeRemoteJid(jid: string): string {
   if (trimmed.includes('@g.us') || trimmed.includes('@broadcast') || trimmed.includes('@lid')) {
     return trimmed.replace(/@s\.whatsapp\.net$/, '')
   }
-  const clean = trimmed.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@broadcast$/, '').replace(/@lid$/, '').replace(/[^0-9]/g, '')
+  let clean = trimmed.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@broadcast$/, '').replace(/@lid$/, '').replace(/[^0-9]/g, '')
+  if (clean.length === 13 && clean.startsWith('55')) {
+    clean = clean.slice(2)
+  }
+  if (/^[1-9]{2}\d{8,9}$/.test(clean) && !clean.startsWith('55')) {
+    clean = `55${clean}`
+  }
   return `${clean}@s.whatsapp.net`
 }
 
@@ -113,7 +119,7 @@ class EvolutionApiService {
       {
         where: { key: { remoteJid: normalizeRemoteJid(jid) } },
         page: 1,
-        offset: limit
+        offset: 0
       },
       { headers: this.headers }
     )
@@ -122,10 +128,13 @@ class EvolutionApiService {
   }
 
   async sendMessage(jid: string, text: string): Promise<any> {
+    const normalized = normalizeRemoteJid(jid)
+    const isGroup = normalized.endsWith('@g.us') || normalized.includes('@broadcast')
+    const number = isGroup ? normalized : normalized.replace(/@s\.whatsapp\.net$/, '')
     const response = await axios.post(
       `${this.apiUrl}/message/sendText/${this.config?.instanceName}`,
       {
-        number: jid,
+        number,
         text: text
       },
       { headers: this.headers }

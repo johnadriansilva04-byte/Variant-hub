@@ -118,11 +118,11 @@ export async function getWhatsAppStatus(req: AuthRequest, res: Response, next: N
 }
 
 function normalizeJid(jid: string): string {
-  const trimmed = jid.trim()
+  const trimmed = (jid || '' ).trim().replace(/@s\.whatsapp\.net$/, '')
   if (trimmed.includes('@g.us') || trimmed.includes('@broadcast') || trimmed.includes('@lid')) {
-    return trimmed.replace(/@s\.whatsapp\.net$/, '')
+    return trimmed
   }
-  let clean = trimmed.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@broadcast$/, '').replace(/@lid$/, '').replace(/[^0-9]/g, '')
+  let clean = trimmed.replace(/[^0-9]/g, '')
   if (clean.length === 13 && clean.startsWith('55')) {
     clean = clean.slice(2)
   }
@@ -186,16 +186,31 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
 
     const canonicalJids = rows.map(r => r.jid)
     const legacyToCanonical = new Map<string, string>()
-    for (const jid of canonicalJids) {
-      if (jid.startsWith('55') && jid.endsWith('@s.whatsapp.net')) {
-        legacyToCanonical.set(jid.slice(2), jid)
+
+    const digitsOf = (jid: string): string => jid.split('@')[0].replace(/[^0-9]/g, '')
+
+    const canonicalize = (jid: string): string | null => {
+      if (!/^\d{10,13}@s\.whatsapp\.net$/.test(jid) && !/^\d{10,13}$/.test(jid)) return null
+      let digits = digitsOf(jid)
+      if (digits.length === 13 && digits.startsWith('55')) {
+        const pair = canonicalJids.find(o => o !== jid && digitsOf(o) === digits.slice(2))
+        if (pair) return digitsOf(pair)
       }
+      if (digits.length === 12 && digits.startsWith('55')) return digits
+      if (digits.startsWith('55')) digits = digits.slice(2)
+      if (digits.length === 10 || digits.length === 11) return `55${digits}`
+      return null
     }
 
-    for (const [legacy, canonical] of legacyToCanonical.entries()) {
+    for (const jid of canonicalJids) {
+      const canon = canonicalize(jid)
+      if (canon && canon !== jid) legacyToCanonical.set(jid, canon)
+    }
+
+    for (const [legacy, canon] of legacyToCanonical.entries()) {
       const { error: reasError } = await supabase
         .from('whatsapp_messages')
-        .update({ jid: canonical })
+        .update({ jid: canon })
         .eq('jid', legacy)
       if (reasError) throw reasError
 
@@ -205,7 +220,6 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         .eq('jid', legacy)
       if (delError) throw delError
     }
-
     if (rows.length > 0) {
       const { error: upsertError } = await supabase
         .from('whatsapp_conversations')

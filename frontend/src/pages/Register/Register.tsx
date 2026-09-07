@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../../services/api'
+import { useAuth } from '../../contexts/AuthContext'
 
 export default function Register() {
   const navigate = useNavigate()
+  const { register } = useAuth()
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -19,11 +20,8 @@ export default function Register() {
     setLoading(true)
 
     try {
-      const response = await api.post('/auth/register', formData)
-      
-      if (response.success) {
-        navigate('/login')
-      }
+      await register(formData)
+      navigate('/login')
     } catch (err: any) {
       setError(err.message || 'Erro ao criar conta')
     } finally {

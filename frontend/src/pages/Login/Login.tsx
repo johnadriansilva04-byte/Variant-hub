@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../../services/api'
+import { useAuth } from '../../contexts/AuthContext'
 
 export default function Login() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [formData, setFormData] = useState({
     email: '',
     password: ''
@@ -17,12 +18,8 @@ export default function Login() {
     setLoading(true)
 
     try {
-      const response = await api.post('/auth/login', formData)
-      
-      if (response.success) {
-        localStorage.setItem('user', JSON.stringify(response.data))
-        navigate('/')
-      }
+      await login(formData.email, formData.password)
+      navigate('/')
     } catch (err: any) {
       setError(err.message || 'Credenciais inválidas')
     } finally {

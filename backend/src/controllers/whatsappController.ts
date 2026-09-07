@@ -151,7 +151,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
       instanceName: config.instanceName
     })
 
-    const chats = await evolutionApiService.getChats()
+    const chats = await evolutionApiService.getChats(50)
 
     const lastMessageOf = (chat: any) =>
       typeof chat.lastMessage === 'string'
@@ -165,23 +165,26 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         ? chat.lastMessage
         : chat.lastMessage?.messageTimestamp
 
-    for (const chat of chats) {
-      await supabase
+    const rows = chats.map((chat) => ({
+      jid: normalizeJid(chat.id),
+      name: chat.name || normalizeJid(chat.id),
+      last_message: lastMessageOf(chat),
+      last_message_timestamp: lastMessageTimestampOf(chat)
+        ? new Date(lastMessageTimestampOf(chat) * 1000).toISOString()
+        : null,
+      unread_count: chat.unreadCount || 0,
+      integration_id: integration?.id,
+      updated_at: new Date().toISOString()
+    }))
+
+    if (rows.length > 0) {
+      const { error: upsertError } = await supabase
         .from('whatsapp_conversations')
-        .upsert({
-          jid: normalizeJid(chat.id),
-          name: chat.name || normalizeJid(chat.id),
-          last_message: lastMessageOf(chat),
-          last_message_timestamp: lastMessageTimestampOf(chat)
-            ? new Date(lastMessageTimestampOf(chat) * 1000).toISOString()
-            : null,
-          unread_count: chat.unreadCount || 0,
-          integration_id: integration?.id,
-          updated_at: new Date().toISOString()
-        }, { 
+        .upsert(rows, {
           onConflict: 'jid',
           ignoreDuplicates: false
         })
+      if (upsertError) throw upsertError
     }
 
     const { data: savedConversations, error: fetchError } = await supabase

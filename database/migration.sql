@@ -287,3 +287,29 @@ CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders
 INSERT INTO users (email, password_hash, name, role, status)
 VALUES ('admin@variant.app', 'demo-password-hash', 'Admin Variant Hub', 'admin', 'active')
 ON CONFLICT (email) DO NOTHING;
+
+-- ============================================
+-- ROW LEVEL SECURITY PARA TABELA USERS
+-- ============================================
+
+-- Habilitar RLS na tabela users
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- Política para permitir INSERT (registro) para usuários anônimos e autenticados
+CREATE POLICY "Allow public insert on users" ON users
+FOR INSERT
+TO anon, authenticated
+WITH CHECK (true);
+
+-- Política para permitir SELECT (login) para usuários anônimos e autenticados
+CREATE POLICY "Allow public select on users" ON users
+FOR SELECT
+TO anon, authenticated
+USING (true);
+
+-- Política para permitir UPDATE para usuários autenticados
+CREATE POLICY "Allow authenticated update on users" ON users
+FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);

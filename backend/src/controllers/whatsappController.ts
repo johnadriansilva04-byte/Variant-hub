@@ -118,7 +118,11 @@ export async function getWhatsAppStatus(req: AuthRequest, res: Response, next: N
 }
 
 function normalizeJid(jid: string): string {
-  return jid.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@broadcast$/, '').replace(/[^0-9]/g, '')
+  const trimmed = jid.trim()
+  if (trimmed.includes('@g.us') || trimmed.includes('@broadcast') || trimmed.includes('@lid')) {
+    return trimmed.replace(/@s\.whatsapp\.net$/, '')
+  }
+  return trimmed.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@broadcast$/, '').replace(/@lid$/, '').replace(/[^0-9]/g, '')
 }
 
 async function resolveConfig(candidate: any) {
@@ -149,15 +153,27 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
 
     const chats = await evolutionApiService.getChats()
 
+    const lastMessageOf = (chat: any) =>
+      typeof chat.lastMessage === 'string'
+        ? chat.lastMessage
+        : chat.lastMessage?.message?.conversation ||
+          chat.lastMessage?.message?.extendedTextMessage?.text ||
+          ''
+
+    const lastMessageTimestampOf = (chat: any) =>
+      typeof chat.lastMessage === 'number'
+        ? chat.lastMessage
+        : chat.lastMessage?.messageTimestamp
+
     for (const chat of chats) {
       await supabase
         .from('whatsapp_conversations')
         .upsert({
           jid: normalizeJid(chat.id),
           name: chat.name || normalizeJid(chat.id),
-          last_message: chat.lastMessage || '',
-          last_message_timestamp: chat.lastMessageTimestamp
-            ? new Date(chat.lastMessageTimestamp * 1000).toISOString()
+          last_message: lastMessageOf(chat),
+          last_message_timestamp: lastMessageTimestampOf(chat)
+            ? new Date(lastMessageTimestampOf(chat) * 1000).toISOString()
             : null,
           unread_count: chat.unreadCount || 0,
           integration_id: integration?.id,

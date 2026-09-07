@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { API_TOKEN } from '../services/api'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const API_URL = import.meta.env.VITE_API_URL || '/api'
 
 export function useIntegrationStatus(type: string) {
   const [status, setStatus] = useState<'online' | 'offline' | 'loading' | 'not_configured'>('loading')

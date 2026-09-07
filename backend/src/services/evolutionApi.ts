@@ -2,6 +2,15 @@ import axios from 'axios'
 
 const ENV_API_URL = process.env.EVOLUTION_API_URL
 
+function normalizeRemoteJid(jid: string): string {
+  const trimmed = jid.trim()
+  if (trimmed.includes('@g.us') || trimmed.includes('@broadcast') || trimmed.includes('@lid')) {
+    return trimmed.replace(/@s\.whatsapp\.net$/, '')
+  }
+  const clean = trimmed.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '').replace(/@broadcast$/, '').replace(/@lid$/, '').replace(/[^0-9]/g, '')
+  return `${clean}@s.whatsapp.net`
+}
+
 export interface EvolutionApiConfig {
   apiUrl: string
   apiKey: string
@@ -80,23 +89,36 @@ class EvolutionApiService {
     }
   }
 
-  async getChats(): Promise<Chat[]> {
-    const response = await axios.get(
+  async getChats(limit: number = 50): Promise<Chat[]> {
+    const response = await axios.post(
       `${this.apiUrl}/chat/findChats/${this.config?.instanceName}`,
+      { limit, offset: 0 },
       { headers: this.headers }
     )
-    return response.data
+    return (response.data || []).map((chat: any) => ({
+      id: chat.remoteJid || chat.id,
+      name: chat.pushName || chat.name || chat.remoteJid || chat.id,
+      lastMessage:
+        chat.lastMessage?.message?.conversation ||
+        chat.lastMessage?.message?.extendedTextMessage?.text ||
+        '',
+      lastMessageTimestamp: chat.lastMessage?.messageTimestamp,
+      unreadCount: chat.unreadCount || 0
+    }))
   }
 
   async getMessages(jid: string, limit: number = 50): Promise<Message[]> {
-    const response = await axios.get(
+    const response = await axios.post(
       `${this.apiUrl}/chat/findMessages/${this.config?.instanceName}`,
       {
-        headers: this.headers,
-        params: { jid, limit }
-      }
+        where: { key: { remoteJid: normalizeRemoteJid(jid) } },
+        page: 1,
+        offset: limit
+      },
+      { headers: this.headers }
     )
-    return response.data
+    const records = response.data?.messages?.records || response.data || []
+    return records
   }
 
   async sendMessage(jid: string, text: string): Promise<any> {
@@ -112,8 +134,9 @@ class EvolutionApiService {
   }
 
   async getContacts(): Promise<any[]> {
-    const response = await axios.get(
+    const response = await axios.post(
       `${this.apiUrl}/chat/findContacts/${this.config?.instanceName}`,
+      { limit: 50, offset: 0 },
       { headers: this.headers }
     )
     return response.data

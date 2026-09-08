@@ -366,7 +366,7 @@ export default function WhatsApp() {
                     className="p-1 rounded-md hover:bg-dark-800 text-dark-500"
                     title="Atualizar conversas"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${connectionStatus === 'connecting' ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`w-4 h-4 ${connectionStatus === 'connecting' ? 'animate-spin' : ''}`} />
                   </button>
                 </div>
                 <div className="flex-1 overflow-y-auto scrollbar-thin">
@@ -386,7 +386,7 @@ export default function WhatsApp() {
                         onClick={() => handleChatSelect(conv.id)}
                         className={`w-full text-left p-3 border-b border-dark-800/60 transition-colors ${selectedChat === conv.id ? 'bg-store-500/10 border-l-2 border-l-store-500' : 'hover:bg-dark-800/50'}`}
                       >
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex items-center gap-2">
                           <div className="w-9 h-9 rounded-full bg-dark-800 text-dark-300 text-xs font-bold flex items-center justify-center shrink-0">
                             {conv.initials}
                           </div>
@@ -409,8 +409,8 @@ export default function WhatsApp() {
               <section className="flex-1 flex flex-col min-w-0 bg-dark-950/40">
                 {selectedChat ? (
                   <>
-                    <div className="flex items-center gap-2.5 p-3 border-b border-dark-800 bg-dark-900/40 shrink-0">
-                      <button onClick={() => setSelectedChat(null)} className="p-1.5 rounded-lg hover:bg-dark-800 text-dark-400">
+                    <div className="flex items-center gap-2 p-3 border-b border-dark-800 bg-dark-900/40 shrink-0">
+                      <button onClick={() => setSelectedChat(null)} className="p-1 rounded-lg hover:bg-dark-800 text-dark-400">
                         <ArrowLeft className="w-4 h-4" />
                       </button>
                       <div className="flex-1 min-w-0">
@@ -467,7 +467,7 @@ export default function WhatsApp() {
                           onChange={(e) => setNewMessage(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                           placeholder="Digite sua mensagem..."
-                          className="flex-1 bg-dark-800 border border-dark-700 rounded-lg px-4 py-2.5 text-sm text-dark-200 placeholder-dark-500 focus:outline-none focus:border-store-500"
+                          className="flex-1 bg-dark-800 border border-dark-700 rounded-lg px-4 py-2 text-sm text-dark-200 placeholder-dark-500 focus:outline-none focus:border-store-500"
                         />
                         <button
                           onClick={sendMessage}
@@ -513,22 +513,22 @@ export default function WhatsApp() {
 
           {expandedModules.operacao && (
             <div className="p-4 border-t border-dark-800 grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="rounded-xl border border-dark-800 bg-dark-950/60 p-3.5">
+              <div className="rounded-xl border border-dark-800 bg-dark-950/60 p-3">
                 <p className="text-[11px] text-dark-500 font-medium">Conversas ativas</p>
                 <p className="text-2xl font-bold text-store-400 mt-1">{stats.activeConversations}</p>
                 <p className="text-[10px] text-dark-600 mt-0.5">agora</p>
               </div>
-              <div className="rounded-xl border border-dark-800 bg-dark-950/60 p-3.5">
+              <div className="rounded-xl border border-dark-800 bg-dark-950/60 p-3">
                 <p className="text-[11px] text-dark-500 font-medium">Contatos únicos</p>
                 <p className="text-2xl font-bold text-store-400 mt-1">{stats.uniqueContacts}</p>
                 <p className="text-[10px] text-dark-600 mt-0.5">total</p>
               </div>
-              <div className="rounded-xl border border-dark-800 bg-dark-950/60 p-3.5">
+              <div className="rounded-xl border border-dark-800 bg-dark-950/60 p-3">
                 <p className="text-[11px] text-dark-500 font-medium">Mensagens recebidas</p>
                 <p className="text-2xl font-bold text-store-400 mt-1">{stats.messagesReceived}</p>
                 <p className="text-[10px] text-dark-600 mt-0.5">hoje</p>
               </div>
-              <div className="rounded-xl border border-dark-800 bg-dark-950/60 p-3.5">
+              <div className="rounded-xl border border-dark-800 bg-dark-950/60 p-3">
                 <p className="text-[11px] text-dark-500 font-medium">Mensagens enviadas</p>
                 <p className="text-2xl font-bold text-store-400 mt-1">{stats.messagesSent}</p>
                 <p className="text-[10px] text-dark-600 mt-0.5">hoje</p>
@@ -562,7 +562,7 @@ export default function WhatsApp() {
 
           {expandedModules.conexao && (
             <div className="p-4 border-t border-dark-800 grid md:grid-cols-2 gap-4">
-              <div className="space-y-3.5">
+              <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-medium text-dark-300 mb-1">URL da API</label>
                   <input
@@ -584,7 +584,7 @@ export default function WhatsApp() {
                   />
                 </div>
               </div>
-              <div className="space-y-3.5">
+              <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-medium text-dark-300 mb-1">Nome da Instância</label>
                   <input

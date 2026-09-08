@@ -90,7 +90,7 @@ export async function saveWhatsAppConfig(req: AuthRequest, res: Response, next: 
 
 export async function getWhatsAppStatus(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const config = req.body
+    const config = await resolveConfig(req.body?.config || req.body)
 
     if (!config || !config.apiUrl || !config.apiKey || !config.instanceName) {
       throw createError('Configuração incompleta', 400)

@@ -104,7 +104,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-        <Panel
+        <Panel collapsible defaultOpen
           tone="calcada"
           title="Calçada · descoberta e tráfego"
           subtitle="Instagram, Telegram, Facebook e TikTok alimentando a loja"
@@ -154,7 +154,7 @@ export default function Dashboard() {
           </div>
         </Panel>
 
-        <Panel
+        <Panel collapsible defaultOpen
           tone="store"
           title="Loja · WhatsApp converte"
           subtitle="Atendimento que vende: pedidos, faturamento e satisfação"
@@ -195,7 +195,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-        <Panel
+        <Panel collapsible defaultOpen={false}
           title="Atividade recente"
           subtitle="Eventos das duas pontas do funil em tempo real"
           className="xl:col-span-2 rounded-2xl"
@@ -208,7 +208,7 @@ export default function Dashboard() {
         </Panel>
 
         <div className="space-y-6">
-          <Panel title="Operação da loja agora" className="rounded-2xl" flush>
+          <Panel collapsible defaultOpen={false} title="Operação da loja agora" className="rounded-2xl" flush>
             <div className="space-y-3">
               <Stat label="Conversas ativas no WhatsApp" value="0" tone="store" sub="agora" />
               <Stat label="IA respondendo" value="0" sub="0% de resolução por IA" />
@@ -220,7 +220,7 @@ export default function Dashboard() {
             </Link>
           </Panel>
 
-          <Panel title="Canais e serviços" className="rounded-2xl" flush>
+          <Panel collapsible defaultOpen={false} title="Canais e serviços" className="rounded-2xl" flush>
             <ul className="space-y-2.5">
               {channelStatus.map((c) => (
                 <li key={c.name} className="flex items-center justify-between gap-3">

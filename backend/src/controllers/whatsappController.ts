@@ -126,36 +126,56 @@ export async function getWhatsAppStatus(req: AuthRequest, res: Response, next: N
 }
 
 function normalizeJid(jid: string): string {
-  const trimmed = (jid || '' ).trim().replace(/@s\.whatsapp\.net$/, '')
+  const trimmed = (jid || '').trim().replace(/@s\.whatsapp\.net$/, '')
   if (trimmed.includes('@g.us') || trimmed.includes('@broadcast') || trimmed.includes('@lid')) {
     return trimmed
   }
   let clean = trimmed.replace(/[^0-9]/g, '')
-  if (clean.length === 13 && clean.startsWith('55')) {
-    clean = clean.slice(2)
-  }
-  if (/^[1-9]{2}\d{8,9}$/.test(clean) && !clean.startsWith('55')) {
-    clean = `55${clean}`
+  // Sempre manter com prefixo 55 para JIDs de telefone
+  if (clean.length === 11 && /^[1-9]{2}\d{9}$/.test(clean)) {
+    clean = `55${clean}`  // 11 dígitos → 55 + DDD + 9 dígitos
+  } else if (clean.length === 13 && clean.startsWith('55')) {
+    // Já tem 55, manter como está
+  } else if (clean.length === 10 && /^[1-9]{2}\d{8}$/.test(clean)) {
+    clean = `55${clean}0`  // 10 dígitos antigos (8 dígitos pós-DDD) → adicionar 9 e prefixo
   }
   return clean
 }
 
-function cleanChatName(jid: string, rawName: string | null | undefined, selfPhone?: string): string {
-  const trimmed = (rawName || '' ).toString().trim()
-  const j = normalizeJid(jid)
-  if (selfPhone) {
-    const sp = String(selfPhone).replace(/[^0-9]/g, '' )
-    const jn = j.split('@')[0].replace(/[^0-9]/g, '')
-    if (jn === sp || jn.replace(/^55/,'' ) === sp.replace(/^55/,'' )) return 'Você'
-  }
-  if (trimmed && !trimmed.includes('@') && !['você','voce','you','eu'].includes(trimmed.toLowerCase()) && !/^\+?\d{8,}$/.test(trimmed)) return trimmed
-  if (j.includes('@g.us')) return 'Grupo de WhatsApp'
-  if (j.includes('@lid') || j.includes('@broadcast')) return 'Contato'
-  const d = j.split('@')[0].replace(/[^0-9]/g, '' ).replace(/^55/, '' )
+function formatPhone(digits: string): string {
+  const d = digits.replace(/[^0-9]/g, '').replace(/^55/, '')
   if (d.length >= 10) {
-    return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
+    return `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}`
   }
-  return d || 'Contato'
+  return d || ''
+}
+
+function isSelfJid(jid: string, selfPhone?: string): boolean {
+  if (!selfPhone) return false
+  const sp = String(selfPhone).replace(/[^0-9]/g, '')
+  const jn = normalizeJid(jid).split('@')[0].replace(/[^0-9]/g, '')
+  return jn === sp || jn.replace(/^55/, '') === sp.replace(/^55/, '')
+}
+
+function cleanChatName(jid: string, rawName: string | null | undefined, selfPhone?: string): string {
+  const trimmed = (rawName || '').toString().trim()
+  const j = normalizeJid(jid)
+  // Self
+  if (isSelfJid(jid, selfPhone)) return 'Você'
+  // Push name válido (não é número, não é lixo)
+  if (trimmed && !trimmed.includes('@') && !['você','voce','you','eu','contato'].includes(trimmed.toLowerCase()) && !/^\+?\d{8,}$/.test(trimmed)) return trimmed
+  // Grupo
+  if (j.includes('@g.us')) return 'Grupo de WhatsApp'
+  // LID/broadcast → tentar extrair do dígito, senão "Sem nome"
+  if (j.includes('@lid') || j.includes('@broadcast')) {
+    const d = j.split('@')[0].replace(/[^0-9]/g, '').replace(/^55/, '')
+    const formatted = formatPhone(d)
+    return formatted || 'Sem nome'
+  }
+  // Telefone normal
+  const d = j.split('@')[0].replace(/[^0-9]/g, '').replace(/^55/, '')
+  const formatted = formatPhone(d)
+  return formatted || 'Sem nome'
 }
 
 
@@ -205,11 +225,7 @@ const selfPhone = (candidate && candidate.phone) || (integration?.config && (int
         const displayName = cleanChatName(chat.jid, chat.name, selfPhone)
         const rawPreview = chat.last_message || ''
         const preview = rawPreview.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Sem mensagem'
-        const isSelf = selfPhone ? (() => {
-          const sp = String(selfPhone).replace(/[^0-9]/g, '')
-          const jn = chat.jid.split('@')[0].replace(/[^0-9]/g, '')
-          return jn === sp || jn.replace(/^55/, '') === sp.replace(/^55/, '')
-        })() : false
+        const isSelf = isSelfJid(chat.jid, selfPhone)
         return {
           id: chat.jid,
           customer: displayName,
@@ -399,11 +415,7 @@ const selfPhone = (candidate && candidate.phone) || (integration?.config && (int
         initials: displayName.substring(0, 2).toUpperCase(),
         context: preview,
         origin: 'WhatsApp',
-        isSelf: selfPhone ? (() => {
-          const sp = String(selfPhone).replace(/[^0-9]/g, '')
-          const jn = chat.jid.split('@')[0].replace(/[^0-9]/g, '')
-          return jn === sp || jn.replace(/^55/, '') === sp.replace(/^55/, '')
-        })() : false,
+        isSelf: isSelfJid(chat.jid, selfPhone),
         lastActivity: chat.last_message_timestamp 
           ? new Date(chat.last_message_timestamp).toLocaleString('pt-BR')
           : '—',

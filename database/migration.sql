@@ -320,18 +320,22 @@ ON CONFLICT (email) DO NOTHING;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
 -- Política para permitir INSERT (registro) para usuários anônimos e autenticados
+-- (DROP IF EXISTS antes de cada CREATE POLICY torna o arquivo re-rodável)
+DROP POLICY IF EXISTS "Allow public insert on users" ON users;
 CREATE POLICY "Allow public insert on users" ON users
 FOR INSERT
 TO anon, authenticated
 WITH CHECK (true);
 
 -- Política para permitir SELECT (login) para usuários anônimos e autenticados
+DROP POLICY IF EXISTS "Allow public select on users" ON users;
 CREATE POLICY "Allow public select on users" ON users
 FOR SELECT
 TO anon, authenticated
 USING (true);
 
 -- Política para permitir UPDATE para usuários autenticados
+DROP POLICY IF EXISTS "Allow authenticated update on users" ON users;
 CREATE POLICY "Allow authenticated update on users" ON users
 FOR UPDATE
 TO authenticated

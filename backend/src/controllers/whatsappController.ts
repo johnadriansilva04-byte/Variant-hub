@@ -125,57 +125,64 @@ export async function getWhatsAppStatus(req: AuthRequest, res: Response, next: N
   }
 }
 
-function normalizeJid(jid: string): string {
-  const trimmed = (jid || '').trim().replace(/@s\.whatsapp\.net$/, '')
-  if (trimmed.includes('@g.us') || trimmed.includes('@broadcast') || trimmed.includes('@lid')) {
-    return trimmed
-  }
-  let clean = trimmed.replace(/[^0-9]/g, '')
-  // Sempre manter com prefixo 55 para JIDs de telefone
-  if (clean.length === 11 && /^[1-9]{2}\d{9}$/.test(clean)) {
-    clean = `55${clean}`  // 11 dígitos → 55 + DDD + 9 dígitos
-  } else if (clean.length === 13 && clean.startsWith('55')) {
-    // Já tem 55, manter como está
-  } else if (clean.length === 10 && /^[1-9]{2}\d{8}$/.test(clean)) {
-    clean = `55${clean}0`  // 10 dígitos antigos (8 dígitos pós-DDD) → adicionar 9 e prefixo
-  }
-  return clean
+// ── Phone helpers ──────────────────────────────────────────────
+// Brazilian phone: DDD (2) + 9 digits (mobile, starts with 9) or 8 digits (landline)
+// JID format from Evolution API: 55XXXXXXXXXXX@s.whatsapp.net (13 digits with country code)
+
+/** Extract digits from a JID, stripping @s.whatsapp.net */
+function jidDigits(rawJid: string): string {
+  return (rawJid || '').trim().split('@')[0].replace(/[^0-9]/g, '')
 }
 
-function formatPhone(digits: string): string {
-  const d = digits.replace(/[^0-9]/g, '').replace(/^55/, '')
-  if (d.length >= 10) {
-    return `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}`
+/** Format Brazilian phone for display: (48) 99880-030 */
+function formatBR(digits: string): string {
+  const d = digits.replace(/^55/, '')  // strip country code
+  if (d.length === 11) {
+    // Mobile: DDD(2) + 9(1) + 8 = 11 digits
+    return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`
   }
-  return d || ''
+  if (d.length === 10) {
+    // Landline: DDD(2) + 8 = 10 digits
+    return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`
+  }
+  return d  // fallback: just show digits
 }
 
-function isSelfJid(jid: string, selfPhone?: string): boolean {
+/** Normalize JID for database key — keep domain suffix for groups/lid */
+function normalizeJid(raw: string): string {
+  const s = (raw || '').trim()
+  if (s.includes('@g.us') || s.includes('@lid') || s.includes('@broadcast')) return s
+  // Phone: strip @s.whatsapp.net, keep digits with 55 prefix
+  return jidDigits(s)
+}
+
+/** Check if JID is the user's own number */
+function isSelfJid(rawJid: string, selfPhone?: string): boolean {
   if (!selfPhone) return false
   const sp = String(selfPhone).replace(/[^0-9]/g, '')
-  const jn = normalizeJid(jid).split('@')[0].replace(/[^0-9]/g, '')
-  return jn === sp || jn.replace(/^55/, '') === sp.replace(/^55/, '')
+  const jd = jidDigits(rawJid)
+  return jd === sp || jd === `55${sp}` || jd.replace(/^55/, '') === sp.replace(/^55/, '')
 }
 
-function cleanChatName(jid: string, rawName: string | null | undefined, selfPhone?: string): string {
-  const trimmed = (rawName || '').toString().trim()
-  const j = normalizeJid(jid)
-  // Self
-  if (isSelfJid(jid, selfPhone)) return 'Você'
-  // Push name válido (não é número, não é lixo)
-  if (trimmed && !trimmed.includes('@') && !['você','voce','you','eu','contato'].includes(trimmed.toLowerCase()) && !/^\+?\d{8,}$/.test(trimmed)) return trimmed
-  // Grupo
-  if (j.includes('@g.us')) return 'Grupo de WhatsApp'
-  // LID/broadcast → tentar extrair do dígito, senão "Sem nome"
-  if (j.includes('@lid') || j.includes('@broadcast')) {
-    const d = j.split('@')[0].replace(/[^0-9]/g, '').replace(/^55/, '')
-    const formatted = formatPhone(d)
-    return formatted || 'Sem nome'
+/** Resolve display name for a chat */
+function cleanChatName(rawJid: string, pushName: string | null | undefined, selfPhone?: string): string {
+  const name = (pushName || '').trim()
+  // 1. Self → "Você"
+  if (isSelfJid(rawJid, selfPhone)) return 'Você'
+  // 2. Real push name (not a number, not junk)
+  if (name && !name.includes('@') && !/^\d{6,}$/.test(name) && !['contato','you','eu'].includes(name.toLowerCase())) {
+    return name
   }
-  // Telefone normal
-  const d = j.split('@')[0].replace(/[^0-9]/g, '').replace(/^55/, '')
-  const formatted = formatPhone(d)
-  return formatted || 'Sem nome'
+  // 3. Group
+  if (rawJid.includes('@g.us')) return 'Grupo'
+  // 4. LID / broadcast — no phone number available
+  if (rawJid.includes('@lid') || rawJid.includes('@broadcast')) {
+    return name || 'Sem nome'
+  }
+  // 5. Phone number → format
+  const digits = jidDigits(rawJid)
+  if (digits.length >= 10) return formatBR(digits)
+  return name || 'Sem nome'
 }
 
 

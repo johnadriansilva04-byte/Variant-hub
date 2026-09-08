@@ -179,7 +179,8 @@ export async function syncWhatsAppMessages(req: AuthRequest, res: Response, next
 
     let syncedCount =  0
     const nowIso = new Date().toISOString()
-    for (const row of rows) {
+    const syncRows = rows.slice(0, 10)
+    await Promise.all(syncRows.map(async (row) => {
       try {
         const messages = await evolutionApiService.getMessages(row.jid, 30)
         for (const msg of messages) {
@@ -192,7 +193,7 @@ export async function syncWhatsAppMessages(req: AuthRequest, res: Response, next
       } catch (err: any) {
         console.error('sync failed for', row.jid, err?.message || err)
       }
-    }
+    }))
 
     const { error: touchError } = await supabase
       .from('whatsapp_conversations')

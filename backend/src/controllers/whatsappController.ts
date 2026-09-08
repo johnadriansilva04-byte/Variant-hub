@@ -317,7 +317,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         .from('whatsapp_conversations')
         .select('jid')
       if (staleErr) throw staleErr
-      const staleJids = (staleAll || []).map((c: any) => c.jid.filter((j: string) => !activeJids.has(j)))
+      const staleJids = (staleAll || []).map((c: any) => c.jid).filter((j: string) => !activeJids.has(j))
       if (staleJids.length > 0) {
         await supabase.from('whatsapp_messages').delete().in('jid', staleJids)
         await supabase.from('whatsapp_conversations').delete().in('jid', staleJids)

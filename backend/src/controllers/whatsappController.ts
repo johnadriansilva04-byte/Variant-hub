@@ -195,7 +195,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
       const { data: cachedConversations, error: cacheError } = await supabase
         .from('whatsapp_conversations')
         .select('*')
-        .order('sync_order', { ascending: true, nullsFirst: false })
+        .order('last_message_timestamp', { ascending: false, nullsFirst: false })
         .limit(200)
 
       if (cacheError) throw cacheError
@@ -238,7 +238,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         : chat.lastMessage?.messageTimestamp
 
     const selfPhone = typeof integration?.config === 'object' && integration.config ? integration.config.phone : undefined
-    const rows = chats.map((chat, idx: number) => ({
+    const rows = chats.map((chat) => ({
       jid: normalizeJid(chat.id),
       name: cleanChatName(chat.id, chat.name, selfPhone),
       last_message: lastMessageOf(chat),
@@ -247,7 +247,6 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         : null,
       unread_count: chat.unreadCount || 0,
       integration_id: integration?.id,
-      sync_order: idx,
       updated_at: new Date().toISOString()
     }))
 
@@ -328,7 +327,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
     const { data: savedConversations, error: fetchError } = await supabase
       .from('whatsapp_conversations')
       .select('*')
-      .order('sync_order', { ascending: true, nullsFirst: false })
+      .order('last_message_timestamp', { ascending: false, nullsFirst: false })
       .limit(200)
 
     if (fetchError) throw fetchError

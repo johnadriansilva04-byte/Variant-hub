@@ -48,7 +48,7 @@ export default function WhatsApp() {
     if (convInFlightRef.current) return
     convInFlightRef.current = true
     if (!opts.silent) setLoadingConversations(true)
-    setErrorMsg('')
+    if (!opts.silent) setErrorMsg('')
     try {
       const result = await whatsappApi.getConversations(config?.apiUrl ? config : undefined)
       const next = result.data || []

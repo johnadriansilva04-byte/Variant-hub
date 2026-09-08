@@ -152,7 +152,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
     const config = await resolveConfig(candidate)
     const integration = await getWhatsAppIntegration()
 
-    // Cache curto: se o Supabase ja foi sincronizado ha menos de 15s,
+    // Cache curto: se o Supabase ja foi sincronizado ha menos de 25s,
     // retorna direto do banco sem chamar a Evolution API (evita lentidao no painel
     const { data: lastUpdatedRows } = await supabase
       .from('whatsapp_conversations')
@@ -162,7 +162,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
 
     const lastUpdated = lastUpdatedRows?.[0]?.updated_at
     const fresh = lastUpdated &&
-      Date.now() - new Date(lastUpdated).getTime() < 15_000
+      Date.now() - new Date(lastUpdated).getTime() < 25_000
 
     if (fresh) {
       const { data: cachedConversations, error: cacheError } = await supabase

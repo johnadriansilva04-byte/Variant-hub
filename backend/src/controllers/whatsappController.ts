@@ -425,7 +425,7 @@ export async function getWhatsAppMessages(req: AuthRequest, res: Response, next:
       })
       .map((msg: any) => ({
         jid: normalizeJid(jid),
-        message_content: msg.message.conversation || msg.message.extendedTextMessage?.text || '',
+        message_content: msg.message?.conversation || msg.message?.extendedTextMessage?.text || '',
         direction: msg.key.fromMe ? 'outbound' : 'inbound',
         sender_type: msg.key.fromMe ? 'user' : 'contact',
         timestamp: new Date(Number(msg.messageTimestamp) * 1000).toISOString(),
@@ -444,7 +444,7 @@ export async function getWhatsAppMessages(req: AuthRequest, res: Response, next:
 
     const transformedMessages = messages.map((msg) => ({
       id: msg.key.id,
-      content: msg.message.conversation || msg.message.extendedTextMessage?.text || '',
+      content: msg.message?.conversation || msg.message?.extendedTextMessage?.text || '',
       direction: msg.key.fromMe ? 'outbound' : 'inbound',
       senderType: msg.key.fromMe ? 'user' : 'contact',
       timestamp: new Date(msg.messageTimestamp * 1000).toISOString(),

@@ -201,20 +201,42 @@ const selfPhone = (candidate && candidate.phone) || (integration?.config && (int
 
       if (cacheError) throw cacheError
 
-      return res.json({
-        success: true,
-        data: (cachedConversations || []).map((chat: any) => ({
+      const rawCached = (cachedConversations || []).map((chat: any) => {
+        const displayName = cleanChatName(chat.jid, chat.name, selfPhone)
+        const rawPreview = chat.last_message || ''
+        const preview = rawPreview.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Sem mensagem'
+        const isSelf = selfPhone ? (() => {
+          const sp = String(selfPhone).replace(/[^0-9]/g, '')
+          const jn = chat.jid.split('@')[0].replace(/[^0-9]/g, '')
+          return jn === sp || jn.replace(/^55/, '') === sp.replace(/^55/, '')
+        })() : false
+        return {
           id: chat.jid,
-          customer: cleanChatName(chat.jid, chat.name, selfPhone),
-          initials: cleanChatName(chat.jid, chat.name, selfPhone).substring(0, 2).toUpperCase(),
-          context: chat.last_message || 'Sem mensagem',
+          customer: displayName,
+          initials: displayName.substring(0, 2).toUpperCase(),
+          context: preview,
           origin: 'WhatsApp',
+          isSelf,
           lastActivity: chat.last_message_timestamp
             ? new Date(chat.last_message_timestamp).toLocaleString('pt-BR')
             : '—',
+          lastTimestamp: chat.last_message_timestamp || null,
           handledBy: 'IA' as const,
           status: 'Novo' as const
-        }))
+        }
+      })
+      const cachedConversationsSorted = rawCached
+        .filter((c: any) => !c.isSelf)
+        .sort((a: any, b: any) => {
+          const ta = a.lastTimestamp ? new Date(a.lastTimestamp).getTime() : 0
+          const tb = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : 0
+          return tb - ta
+        })
+        .map(({ lastTimestamp: _, isSelf: __, ...rest }: any) => rest)
+
+      return res.json({
+        success: true,
+        data: cachedConversationsSorted
       })
     }
 
@@ -366,18 +388,40 @@ const selfPhone = (candidate && candidate.phone) || (integration?.config && (int
     }))
 
 
-    const conversations = (savedConversations || []).map((chat: any) => ({
-      id: chat.jid,
-      customer: chat.name || chat.jid,
-      initials: (chat.name || chat.jid).substring(0, 2).toUpperCase(),
-      context: chat.last_message || 'Sem mensagem',
-      origin: 'WhatsApp',
-      lastActivity: chat.last_message_timestamp 
-        ? new Date(chat.last_message_timestamp).toLocaleString('pt-BR')
-        : '—',
-      handledBy: 'IA' as const,
-      status: 'Novo' as const
-    }))
+    const rawConversations = (savedConversations || []).map((chat: any) => {
+      const displayName = cleanChatName(chat.jid, chat.name, selfPhone)
+      const rawPreview = chat.last_message || ''
+      // Trunca preview: max 80 chars, sem quebras de linha
+      const preview = rawPreview.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Sem mensagem'
+      return {
+        id: chat.jid,
+        customer: displayName,
+        initials: displayName.substring(0, 2).toUpperCase(),
+        context: preview,
+        origin: 'WhatsApp',
+        isSelf: selfPhone ? (() => {
+          const sp = String(selfPhone).replace(/[^0-9]/g, '')
+          const jn = chat.jid.split('@')[0].replace(/[^0-9]/g, '')
+          return jn === sp || jn.replace(/^55/, '') === sp.replace(/^55/, '')
+        })() : false,
+        lastActivity: chat.last_message_timestamp 
+          ? new Date(chat.last_message_timestamp).toLocaleString('pt-BR')
+          : '—',
+        lastTimestamp: chat.last_message_timestamp || null,
+        handledBy: 'IA' as const,
+        status: 'Novo' as const
+      }
+    })
+
+    // Filtra self e ordena por timestamp desc
+    const conversations = rawConversations
+      .filter((c: any) => !c.isSelf)
+      .sort((a: any, b: any) => {
+        const ta = a.lastTimestamp ? new Date(a.lastTimestamp).getTime() : 0
+        const tb = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : 0
+        return tb - ta
+      })
+      .map(({ lastTimestamp: _, isSelf: __, ...rest }: any) => rest)
 
     res.json({
       success: true,

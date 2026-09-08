@@ -140,6 +140,25 @@ function normalizeJid(jid: string): string {
   return clean
 }
 
+function cleanChatName(jid: string, rawName: string | null | undefined, selfPhone?: string): string {
+  const trimmed = (rawName || '' ).toString().trim()
+  const j = normalizeJid(jid)
+  if (selfPhone) {
+    const sp = String(selfPhone).replace(/[^0-9]/g, '' )
+    const jn = j.split('@')[0].replace(/[^0-9]/g, '')
+    if (jn === sp || jn.replace(/^55/,'' ) === sp.replace(/^55/,'' )) return 'Você'
+  }
+  if (trimmed && !trimmed.includes('@')) return trimmed
+  if (j.includes('@g.us')) return 'Grupo de WhatsApp'
+  if (j.includes('@lid') || j.includes('@broadcast')) return 'Contato'
+  const d = j.split('@')[0].replace(/[^0-9]/g, '' ).replace(/^55/, '' )
+  if (d.length >= 10) {
+    return `${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
+  }
+  return d || 'Contato'
+}
+
+
 async function resolveConfig(candidate: any) {
   if (candidate?.apiUrl && candidate?.apiKey && candidate?.instanceName) {
     return candidate
@@ -176,7 +195,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
       const { data: cachedConversations, error: cacheError } = await supabase
         .from('whatsapp_conversations')
         .select('*')
-        .order('last_message_timestamp', { ascending: false, nullsFirst: false })
+        .order('sync_order', { ascending: true, nullsFirst: false })
         .limit(200)
 
       if (cacheError) throw cacheError
@@ -204,7 +223,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
       instanceName: config.instanceName
     })
 
-    const chats = await evolutionApiService.getChats(50)
+    const chats = await evolutionApiService.getChats(500)
 
     const lastMessageOf = (chat: any) =>
       typeof chat.lastMessage === 'string'
@@ -218,15 +237,17 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         ? chat.lastMessage
         : chat.lastMessage?.messageTimestamp
 
-    const rows = chats.map((chat) => ({
+    const selfPhone = typeof integration?.config === 'object' && integration.config ? integration.config.phone : undefined
+    const rows = chats.map((chat, idx: number) => ({
       jid: normalizeJid(chat.id),
-      name: chat.name || normalizeJid(chat.id),
+      name: cleanChatName(chat.id, chat.name, selfPhone),
       last_message: lastMessageOf(chat),
       last_message_timestamp: lastMessageTimestampOf(chat)
         ? new Date(lastMessageTimestampOf(chat) * 1000).toISOString()
         : null,
       unread_count: chat.unreadCount || 0,
       integration_id: integration?.id,
+      sync_order: idx,
       updated_at: new Date().toISOString()
     }))
 
@@ -291,12 +312,23 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
           })
         if (upsertError) throw upsertError
       }
+
+      const activeJids = new Set(uniqueRows.map(r => r.jid))
+      const { data: staleAll, error: staleErr } = await supabase
+        .from('whatsapp_conversations')
+        .select('jid')
+      if (staleErr) throw staleErr
+      const staleJids = (staleAll || []).map((c: any) => c.jid.filter((j: string) => !activeJids.has(j)))
+      if (staleJids.length > 0) {
+        await supabase.from('whatsapp_messages').delete().in('jid', staleJids)
+        await supabase.from('whatsapp_conversations').delete().in('jid', staleJids)
+      }
     }
 
     const { data: savedConversations, error: fetchError } = await supabase
       .from('whatsapp_conversations')
       .select('*')
-      .order('last_message_timestamp', { ascending: false, nullsFirst: false })
+      .order('sync_order', { ascending: true, nullsFirst: false })
       .limit(200)
 
     if (fetchError) throw fetchError

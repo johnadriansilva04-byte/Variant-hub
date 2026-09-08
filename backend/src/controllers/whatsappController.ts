@@ -79,6 +79,14 @@ export async function saveWhatsAppConfig(req: AuthRequest, res: Response, next: 
 
     if (buildError) throw buildError
 
+    // Registra o webhook na Evolution para receber mensagens em tempo real
+    try {
+      evolutionApiService.configure(config)
+      await evolutionApiService.setWebhook()
+    } catch {
+      // webhook é best-effort; o sync de 30s cobre eventuais falhas
+    }
+
     res.json({
       success: true,
       data: saved

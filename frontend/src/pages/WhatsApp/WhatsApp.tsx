@@ -176,6 +176,7 @@ export default function WhatsApp() {
     let stopped = false
     void loadConversations(cfg, { silent: true })
     void loadStats()
+    void whatsappApi.sync(cfg).catch(() => undefined)
 
     const syncAll = async () => {
       if (document.visibilityState === 'visible') {
@@ -188,12 +189,35 @@ export default function WhatsApp() {
       }
     }
 
+    const syncNow = async () => {
+      if (stopped) return
+      try {
+        const syncRes = await whatsappApi.sync(cfgRef.current)
+        const syncedCount = Number(syncRes.data?.synced ||0)
+        if (syncedCount > 0) {
+          await loadConversations(cfgRef.current, { silent: true })
+          await loadStats()
+          const chatId = selectedChatRef.current
+          if (chatId) await loadMessages(chatId, cfgRef.current, { silent: true })
+        }
+      } catch {
+        // sync silencioso: nunca trava a UI
+      }
+    }
+
     let convTimer: ReturnType<typeof setTimeout> = setTimeout(function tick() {
       if (stopped) return
       void syncAll().finally(() => {
         if (!stopped) convTimer = setTimeout(tick, 10000)
       })
     }, 10000)
+
+    let syncTimer: ReturnType<typeof setTimeout> = setTimeout(function syncTick() {
+      if (stopped) return
+      void syncNow().finally(() => {
+        if (!stopped) syncTimer = setTimeout(syncTick, 30000)
+      })
+    }, 30000)
 
     let msgTimer: ReturnType<typeof setTimeout> | null = null
     const currentChat = selectedChatRef.current
@@ -215,6 +239,7 @@ export default function WhatsApp() {
     return () => {
       stopped = true
       clearTimeout(convTimer)
+      clearTimeout(syncTimer)
       if (msgTimer) clearTimeout(msgTimer)
     }
   }, [connectionStatus, loadConversations, loadMessages, loadStats, selectedChat])

@@ -98,4 +98,7 @@ export const whatsappApi = {
   async sendMessage(jid: string, text: string, config?: any) {
     return api.post('/whatsapp/send', { jid, text, config: config ?? {} })
   },
+  async sync(config?: any) {
+    return api.post('/whatsapp/sync', { config: config ?? {} })
+  },
 }

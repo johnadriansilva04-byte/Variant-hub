@@ -62,6 +62,28 @@ class EvolutionApiService {
     this.config = config
   }
 
+  async setWebhook(events: string[] = ['messages.upsert', 'messages.update', 'send.update', 'connection.update']): Promise<void> {
+    if (!this.config) return
+    const url = `${process.env.PUBLIC_BASE_URL || 'https://variant-hub.vercel.app'}/api/whatsapp/webhook`
+    try {
+      await axios.post(
+        `${this.apiUrl}/webhook/set/${this.config.instanceName}`,
+        { webhook: { url, events, enabled: true } },
+        { headers: this.headers }
+      )
+    } catch (err: any) {
+      try {
+        await axios.post(
+          `${this.apiUrl}/webhook/set/${this.config.instanceName}`,
+          { url, events, enabled: true },
+          { headers: this.headers }
+        )
+      } catch (err2: any) {
+        console.error('setWebhook failed', err2?.response?.data || err2?.message)
+      }
+    }
+  }
+
   private get apiUrl(): string {
     if (!this.config) {
       throw new Error('Evolution API not configured')

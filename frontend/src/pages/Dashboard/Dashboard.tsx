@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, MessageCircle, Bot } from 'lucide-react'
 import PageHeader from '../../components/ui/PageHeader'
@@ -8,15 +9,25 @@ import ChannelChip from '../../components/ui/ChannelChip'
 import Stat from '../../components/ui/Stat'
 import { FunnelSteps } from '../../components/ui/Funnel'
 import { useIntegrationStatus } from '../../hooks/useIntegrationStatus'
+import { analyticsService, formatCurrency, type DashboardData } from '../../services/analytics'
 
-const calcadaFunnel = [
-  { label: 'Alcance', value: 0, note: 'pessoas alcançadas', zone: 'calcada' as const },
-  { label: 'Engajamento', value: 0, note: 'curtidas, comentários, DMs', zone: 'calcada' as const },
-  { label: 'Cliques → WhatsApp', value: 0, note: 'links, botões e CTAs', zone: 'calcada' as const },
-  { label: 'Conversas iniciadas', value: 0, note: 'no WhatsApp da loja', zone: 'store' as const },
-  { label: 'Leads qualificados', value: 0, note: 'com intenção de compra', zone: 'store' as const },
-]
+type FunnelDatum = {
+  label: string
+  value: number
+  note: string
+  zone: 'calcada' | 'store'
+}
 
+function buildFunnel(funnel: DashboardData['funnel']): FunnelDatum[] {
+  const f = funnel || {}
+  return [
+    { label: 'Alcance', value: Number(f.reach) ||0, note: 'pessoas alcançadas', zone: 'calcada' },
+    { label: 'Engajamento', value: Number(f.impressions) ||0, note: 'curtidas, comentários, DMs', zone: 'calcada' },
+    { label: 'Cliques → WhatsApp', value: Number(f.clicksToWhatsApp) ||0, note: 'links, botões e CTAs', zone: 'calcada' },
+    { label: 'Conversas iniciadas', value: Number(f.conversationsInitiated) ||0, note: 'no WhatsApp da loja', zone: 'store' },
+    { label: 'Leads qualificados', value: Number(f.leadsGenerated) ||0, note: 'com intenção de compra', zone: 'store' },
+  ]
+}
 const defaultChannelStatus = [
   { id: 'whatsapp' as const, name: 'API WhatsApp', state: 'Offline', ok: false },
   { id: 'instagram' as const, name: 'Instagram', state: 'Offline', ok: false },
@@ -27,13 +38,40 @@ const defaultChannelStatus = [
 
 export default function Dashboard() {
   const { status: waStatus } = useIntegrationStatus('whatsapp')
+  const [dash, setDash] = useState<DashboardData>({})
+  const [activityList, setActivityList] = useState<any[]>([])
+
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      analyticsService.getDashboard(),
+      analyticsService.getActivity(),
+    ]).then(([d, acts]) => {
+      if (active) {
+        setDash(d)
+        setActivityList(Array.isArray(acts) ? acts : [])
+      }
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [])
+
+  const funnelData = useMemo(() => buildFunnel(dash?.funnel), [dash?.funnel])
 
   const channelStatus = defaultChannelStatus.map(channel => {
-    if (channel.id === 'whatsapp' && waStatus) {
+    const live = dash?.channels?.[channel.id]
+    if (channel.id === 'whatsapp' && (waStatus || live)) {
+
       return {
         ...channel,
-        state: waStatus === 'online' ? 'Conectado' : 'Desconectado',
-        ok: waStatus === 'online'
+        state: waStatus === 'online' || live?.status === 'connected' || live?.status === 'open' ? 'Conectado' : 'Desconectado',
+        ok: waStatus === 'online' || live?.status === 'connected' || live?.status === 'open',
+      }
+    }
+    if (live?.configured || live) {
+      return {
+        ...channel,
+        state: live?.status === 'connected' || live?.status === 'open' ? 'Conectado' : live?.status === 'error' ? 'Erro' : 'Desconectado',
+        ok: live?.status === 'connected' || live?.status === 'open',
       }
     }
     return channel
@@ -93,7 +131,7 @@ export default function Dashboard() {
               </span>
             </div>
           </div>
-          <FunnelSteps data={calcadaFunnel} />
+          <FunnelSteps data={funnelData} />
           <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
             <Stat label="Conversão calçada → loja" value="0%" tone="calcada" sub="0%" />
             <Stat label="Custo por lead" value="R$ 0,00" sub="média dos 4 canais" />
@@ -169,8 +207,8 @@ export default function Dashboard() {
           className="rounded-2xl"
         >
           <div className="grid grid-cols-2 gap-3 mb-5">
-            <Stat label="Vendas hoje" value="0" tone="store" sub="R$ 0,00" />
-            <Stat label="Faturamento hoje" value="R$ 0,00" tone="store" sub="0%" />
+            <Stat label="Vendas hoje" value={String(dash?.orders?.todayCount ??0)} tone="store" sub={formatCurrency(dash?.orders?.todayRevenue ??0)} />
+            <Stat label="Faturamento hoje" value={formatCurrency(dash?.orders?.todayRevenue ??0)} tone="store" sub="hoje" />
             <Stat label="Conversão conversa → pedido" value="0%" tone="store" sub="meta: 20%" />
             <Stat label="Atendidas por IA" value="0%" tone="store" sub="SLA 96% dentro do prazo" />
           </div>
@@ -201,16 +239,35 @@ export default function Dashboard() {
           className="xl:col-span-2 rounded-2xl"
           flush
         >
-          <div className="text-center py-8">
-            <p className="text-sm text-dark-400">Nenhuma atividade recente</p>
-            <p className="text-xs text-dark-500 mt-1">Configure as integrações para começar</p>
-          </div>
+          <div>
+              {activityList.length === 0 ? (
+                <div className="text-center py-8">
+              <p className="text-sm text-dark-400">Nenhuma atividade recente</p>
+              <p className="text-xs text-dark-500 mt-1">Fale no WhatsApp para ver os eventos ao vivo</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-dark-800">
+              {activityList.slice(0, 6).map((ev: any, i: number) => (
+                <li key={i} className="flex items-center gap-2.5 py-2.5">
+                  <ChannelChip channel={String(ev.zone || ev.channel || 'whatsapp') as any} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] text-dark-200 truncate">{ev.action || ev.type || 'Atividade'}</p>
+                    <p className="text-[11px] text-dark-500">{ev.description || ev.message || ''}</p>
+                  </div>
+                  <span className="text-[10px] text-dark-500 tabular-nums shrink-0">
+                    {ev.timestamp ? new Date(ev.timestamp).toLocaleString('pt-BR', { day: '2-digit', hour: '2-digit', minute: '2-digit', month: '2-digit' }) : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         </Panel>
 
         <div className="space-y-6">
           <Panel collapsible defaultOpen={false} title="Operação da loja agora" className="rounded-2xl" flush>
             <div className="space-y-3">
-              <Stat label="Conversas ativas no WhatsApp" value="0" tone="store" sub="agora" />
+              <Stat label="Conversas ativas no WhatsApp" value={String(dash?.whatsapp?.activeConversations ??0)} tone="store" sub={dash?.whatsapp?.lastActivityFrom ? `última: ${dash?.whatsapp?.lastActivityFrom}` : 'agora'} />
               <Stat label="IA respondendo" value="0" sub="0% de resolução por IA" />
               <Stat label="Na fila para atendente" value="0" sub="espera média 0s" />
               <Stat label="SLA cumprido" value="0%" tone="store" sub="resposta em até 2 min" />

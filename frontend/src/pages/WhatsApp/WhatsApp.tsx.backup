@@ -136,7 +136,7 @@ export default function WhatsApp() {
       if (status.connected) {
         alert('✅ Conexão com Evolution API estabelecida com sucesso!')
       } else {
-        alert('⚠️ Configuração salva, mas a instância não está conectada. Verifique o QR Code.')
+        alert('⚠ Configuração salva, mas a instância não está conectada. Verifique o QR Code.')
       }
     } catch (error) {
       console.error('Error testing connection:', error)
@@ -208,7 +208,7 @@ export default function WhatsApp() {
             {loading ? (
               <StatusBadge tone="yellow">Carregando...</StatusBadge>
             ) : !evolutionConfig.apiUrl ? (
-              <StatusBadge tone="yellow">⚠️ Não configurado</StatusBadge>
+              <StatusBadge tone="yellow">⚠ Não configurado</StatusBadge>
             ) : whatsappStatus?.connected ? (
               <StatusBadge tone="green">🟢 Conectado</StatusBadge>
             ) : (

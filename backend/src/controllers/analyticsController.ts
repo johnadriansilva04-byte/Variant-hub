@@ -24,11 +24,19 @@ function sumMetric(rows: any[], metric: string): number {
   return total
 }
 
+function toIso(ts: any): string {
+  const n = Number(ts)
+  if (Number.isFinite(n) && n > 0 && n < 1e12) {
+    return new Date(n * 1000).toISOString()
+  }
+  return new Date(ts).toISOString()
+}
+
 function latestActivityInfo(messages: any[], orders: any[]) {
   let at: string | null = null
   let from: string | null = null
   if (messages.length > 0) {
-    at = messages[0].timestamp
+    at = toIso(messages[0].timestamp)
     from = messages[0].direction === 'inbound' ? 'contato' : 'você'
   } else if (orders.length > 0) {
     at = orders[0].created_at
@@ -63,7 +71,7 @@ export async function getDashboard(req: AuthRequest, res: Response, next: NextFu
     const integrations = await listIntegrations()
     const [conv, msgs, orders, stats] = await Promise.all([
       supabase.from('whatsapp_conversations').select('id, jid'),
-      supabase.from('whatsapp_messages').select('id, direction, timestamp'),
+      supabase.from('whatsapp_messages').select('id, direction, timestamp').order('timestamp', { ascending: false }),
       supabase.from('orders').select('id, total, status, created_at, origin_channel'),
       supabase.from('channel_stats').select('channel_type, reach, impressions, engagement_rate, clicks_to_whatsapp, leads_generated'),
     ])
@@ -175,7 +183,7 @@ export async function getActivity(req: AuthRequest, res: Response, next: NextFun
         title: m.direction === 'inbound' ? 'Nova mensagem no WhatsApp' : 'Mensagem enviada no WhatsApp',
         description: (m.message_content || ' ').substring(0, 180),
         contact: m.push_name || m.jid,
-        timestamp: m.timestamp,
+        timestamp: toIso(m.timestamp),
       })
     }
 

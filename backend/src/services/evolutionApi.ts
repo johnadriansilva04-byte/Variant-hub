@@ -98,13 +98,21 @@ class EvolutionApiService {
 
   // ── Chats / Contatos ───────────────────────────────────────
 
-  async getChats(limit = 100): Promise<EvolutionChat[]> {
+  async getChats(limit = 250): Promise<EvolutionChat[]> {
     const { data } = await axios.post(
       `${this.apiUrl}/chat/findChats/${this.instanceName}`,
       { limit, offset: 0 },
       { headers: this.headers }
     )
-    const list: any[] = Array.isArray(data) ? data : data?.chats || []
+    // Resposta de erro com HTTP 200 (comum na Evolution): NUNCA vira lista vazia
+    if (data?.error || data?.response?.error || data?.message) {
+      throw new Error(typeof data?.error === 'string' ? data.error : 'Evolution findChats retornou erro')
+    }
+    const list: any[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.chats) ? data.chats
+      : Array.isArray(data?.data) ? data.data
+      : []
     return list.map((c: any) => {
       const id = c.remoteJid || c.id || ''
       const lm = c.lastMessage?.message || c.lastMessage || null
@@ -126,7 +134,14 @@ class EvolutionApiService {
       { limit, offset: 0 },
       { headers: this.headers }
     )
-    const list: any[] = Array.isArray(data) ? data : data?.contacts || []
+    if (data?.error || data?.response?.error || data?.message) {
+      throw new Error(typeof data?.error === 'string' ? data.error : 'Evolution findContacts retornou erro')
+    }
+    const list: any[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.contacts) ? data.contacts
+      : Array.isArray(data?.data) ? data.data
+      : []
     return list.map((c: any) => ({
       id: c.remoteJid || c.id || '',
       pushName: c.pushName || null,

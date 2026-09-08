@@ -1,5 +1,5 @@
 import { supabase } from '../db'
-import { evolutionApiService, EvolutionMessage, EvolutionChat } from './evolutionApi'
+import { evolutionApiService, EvolutionMessage, EvolutionChat, EvolutionContact } from './evolutionApi'
 
 // ─────────────────────────────────────────────────────────────
 // WhatsappSyncService — o painel é um ESPELHO da Evolution API.
@@ -293,7 +293,12 @@ async function syncChatMessages(chat: EvolutionChat, integrationId: string | nul
   const stored: StoredMessage[] = []
   for (const m of messages) {
     const sm = extractMessage(m, chat.id)
-    if (sm) { sm.integration_id = integrationId; stored.push(sm) }
+    if (sm) {
+      sm.integration_id = integrationId
+      // Garantia: mensagem sempre no MESMO jid da conversa (evita chave divergente)
+      sm.jid = chat.id
+      stored.push(sm)
+    }
   }
   const added = await storeMessages(stored)
 
@@ -323,21 +328,43 @@ export async function fullSync(candidate?: any): Promise<SyncResult> {
 
   const integrationId = await getIntegrationId()
 
-  const chats = await evolutionApiService.getChats(300)
-  const contacts = await evolutionApiService.getContacts(500)
-  const contactMap = new Map(contacts.map(c => [c.id, c]))
+  const chats = await evolutionApiService.getChats(250)
+
+  // SEGURANÇA: fonte da verdade vazia ou inacessível → NUNCA apagar o banco.
+  // Só tocamos nas conversas quando a Evolution realmente devolveu a lista.
+  if (chats.length === 0) {
+    console.error('fullSync abortado: Evolution retornou 0 chats — banco preservado')
+    return { chatsSynced: 0, messagesAdded: 0, updatedJids: [], ownerJid: effectiveOwner }
+  }
+
+  // Contatos são enriquecimento (nomes/fotos): se falhar, o sync de conversas segue
+  let contactMap = new Map<string, EvolutionContact>()
+  try {
+    const contacts = await evolutionApiService.getContacts(500)
+    contactMap = new Map(contacts.map(c => [c.id, c]))
+  } catch (err: any) {
+    console.error('getContacts falhou (seguindo sem nomes):', err?.message || err)
+  }
 
   let messagesAdded = 0
+  let okCount = 0
   const updatedJids: string[] = []
 
   await runPooled(chats, async (chat) => {
-    const { added, lastMessage } = await syncChatMessages(chat, integrationId, effectiveOwner, 30)
+    const { added, lastMessage } = await syncChatMessages(chat, integrationId, effectiveOwner, 25)
     messagesAdded += added
     const contact = contactMap.get(chat.id)
     const pushName = chat.pushName || contact?.pushName || contact?.verifiedName || null
     await updateConversation(chat.id, pushName, lastMessage, chat.unreadCount)
     updatedJids.push(chat.id)
-  }, 5)
+    okCount++
+  }, 6)
+
+  // SEGURANÇA: se nenhuma conversa foi gravada (ex.: colunas da migração faltando,
+  // API sem permissão), aborta SEM deletar nada — o problema fica visível no log.
+  if (okCount === 0) {
+    throw new Error('fullSync: nenhuma conversa pôde ser gravada — banco intacto, migração rodada?')
+  }
 
   // Fotos de perfil: só busca quando ainda não temos (cache persistente no banco)
   const { data: convRows } = await supabase
@@ -426,7 +453,10 @@ export async function incrementalSync(candidate?: any): Promise<SyncResult> {
       .filter((m): m is StoredMessage => m !== null)
 
     if (fresh.length > 0) {
-      fresh.forEach(m => (m.integration_id = integrationId))
+      fresh.forEach(m => {
+        m.integration_id = integrationId
+        m.jid = chat.id
+      })
       messagesAdded += await storeMessages(fresh)
       const newest = fresh.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0]
       await updateConversation(chat.id, chat.pushName || null, newest, chat.unreadCount)

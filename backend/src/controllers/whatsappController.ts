@@ -179,6 +179,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
     const config = await resolveConfig(candidate)
     const integration = await getWhatsAppIntegration()
 
+const selfPhone = (candidate && candidate.phone) || (integration?.config && (integration.config as any).phone)
     // Cache curto: se o Supabase ja foi sincronizado ha menos de 25s,
     // retorna direto do banco sem chamar a Evolution API (evita lentidao no painel
     const { data: lastUpdatedRows } = await supabase
@@ -204,8 +205,8 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         success: true,
         data: (cachedConversations || []).map((chat: any) => ({
           id: chat.jid,
-          customer: chat.name || chat.jid,
-          initials: (chat.name || chat.jid).substring(0, 2).toUpperCase(),
+          customer: cleanChatName(chat.jid, chat.name, selfPhone),
+          initials: cleanChatName(chat.jid, chat.name, selfPhone).substring(0, 2).toUpperCase(),
           context: chat.last_message || 'Sem mensagem',
           origin: 'WhatsApp',
           lastActivity: chat.last_message_timestamp
@@ -237,7 +238,6 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         ? chat.lastMessage
         : chat.lastMessage?.messageTimestamp
 
-    const selfPhone = (candidate?.phone as string) || (typeof integration?.config === 'object' && integration.config ? (integration.config as any).phone : undefined)
     const rows = chats.map((chat) => ({
       jid: normalizeJid(chat.id),
       name: cleanChatName(chat.id, chat.name, selfPhone),

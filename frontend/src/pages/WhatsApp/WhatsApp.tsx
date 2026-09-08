@@ -33,6 +33,8 @@ export default function WhatsApp() {
   const [activeTab, setActiveTab] = useState<'conversas' | 'contatos' | 'status'>('conversas')
   const cfgRef = useRef(evolutionConfig)
   const selectedChatRef = useRef<string | null>(null)
+  const convInFlightRef = useRef(false)
+  const msgInFlightRef = useRef<Record<string, boolean>>({})
 
   useEffect(() => {
     cfgRef.current = evolutionConfig
@@ -43,6 +45,8 @@ export default function WhatsApp() {
   }, [selectedChat])
 
   const loadConversations = useCallback(async (config?: any, opts: { silent?: boolean } = {}) => {
+    if (convInFlightRef.current) return
+    convInFlightRef.current = true
     if (!opts.silent) setLoadingConversations(true)
     setErrorMsg('')
     try {
@@ -53,6 +57,7 @@ export default function WhatsApp() {
       console.error('Error loading conversations:', error)
       if (!opts.silent) setErrorMsg(error?.message || 'Erro ao carregar conversas')
     } finally {
+      convInFlightRef.current = false
       if (!opts.silent) setLoadingConversations(false)
     }
   }, [])
@@ -67,6 +72,8 @@ export default function WhatsApp() {
   }, [])
 
   const loadMessages = useCallback(async (jid: string, config?: any, opts: { silent?: boolean } = {}) => {
+    if (msgInFlightRef.current[jid]) return
+    msgInFlightRef.current[jid] = true
     if (!opts.silent) setLoadingMessages(true)
     try {
       const result = await whatsappApi.getMessages(jid, config?.apiUrl ? config : undefined)
@@ -76,6 +83,7 @@ export default function WhatsApp() {
       console.error('Error loading messages:', error)
       if (!opts.silent) setErrorMsg(error?.message || 'Erro ao carregar mensagens')
     } finally {
+      msgInFlightRef.current[jid] = false
       if (!opts.silent) setLoadingMessages(false)
     }
   }, [])
@@ -157,37 +165,55 @@ export default function WhatsApp() {
     })
   }, [])
 
-  // Actualizacao em tempo real (polling silencioso)
+  // Actualizacao em tempo real (polling silencioso sem sobreposição)
   useEffect(() => {
     if (connectionStatus !== 'connected') return
     const cfg = cfgRef.current
     if (!cfg?.apiUrl) return
 
+    let stopped = false
     void loadConversations(cfg, { silent: true })
     void loadStats()
 
-    const convTimer = setInterval(() => {
+    const syncAll = async () => {
       if (document.visibilityState === 'visible') {
-        void loadConversations(cfgRef.current, { silent: true })
-        void loadStats()
+        await loadConversations(cfgRef.current, { silent: true })
+        await loadStats()
       }
+      const chatId = selectedChatRef.current
+      if (chatId && document.visibilityState === 'visible') {
+        await loadMessages(chatId, cfgRef.current, { silent: true })
+      }
+    }
+
+    let convTimer: ReturnType<typeof setTimeout> = setTimeout(function tick() {
+      if (stopped) return
+      void syncAll().finally(() => {
+        if (!stopped) convTimer = setTimeout(tick, 10000)
+      })
     }, 10000)
 
-    let msgTimer: ReturnType<typeof setInterval> | null = null
+    let msgTimer: ReturnType<typeof setTimeout> | null = null
     const currentChat = selectedChatRef.current
     if (currentChat) {
       void loadMessages(currentChat, cfgRef.current, { silent: true })
-      msgTimer = setInterval(() => {
+      msgTimer = setTimeout(function msgTick() {
+        if (stopped) return
         const chatId = selectedChatRef.current
         if (chatId && document.visibilityState === 'visible') {
-          void loadMessages(chatId, cfgRef.current, { silent: true })
+          void loadMessages(chatId, cfgRef.current, { silent: true }).finally(() => {
+            if (!stopped) msgTimer = setTimeout(msgTick, 3000)
+          })
+        } else {
+          msgTimer = setTimeout(msgTick, 3000)
         }
       }, 3000)
     }
 
     return () => {
-      clearInterval(convTimer)
-      if (msgTimer) clearInterval(msgTimer)
+      stopped = true
+      clearTimeout(convTimer)
+      if (msgTimer) clearTimeout(msgTimer)
     }
   }, [connectionStatus, loadConversations, loadMessages, loadStats, selectedChat])
 

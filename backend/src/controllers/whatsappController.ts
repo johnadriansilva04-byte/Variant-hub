@@ -222,20 +222,30 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         .eq('jid', legacy)
       if (delError) throw delError
     }
-    if (rows.length > 0) {
-      const { error: upsertError } = await supabase
-        .from('whatsapp_conversations')
-        .upsert(rows, {
-          onConflict: 'jid',
-          ignoreDuplicates: false
-        })
-      if (upsertError) throw upsertError
+    const seenRows = new Set<string>()
+    const uniqueRows = rows.filter((r: any) => {
+      const k = r.jid
+      if (seenRows.has(k)) return false
+      seenRows.add(k)
+      return true
+    })
+    if (uniqueRows.length > 0) {
+      for (let i = 0; i < uniqueRows.length; i += 100) {
+        const { error: upsertError } = await supabase
+          .from('whatsapp_conversations')
+          .upsert(uniqueRows.slice(i, i + 100), {
+            onConflict: 'jid',
+            ignoreDuplicates: false
+          })
+        if (upsertError) throw upsertError
+      }
     }
 
     const { data: savedConversations, error: fetchError } = await supabase
       .from('whatsapp_conversations')
       .select('*')
       .order('last_message_timestamp', { ascending: false, nullsFirst: false })
+      .limit(200)
 
     if (fetchError) throw fetchError
     const savedJids = (savedConversations || []).map((c: any) => c.jid)
@@ -262,7 +272,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
     }
 
     for (const [legacy, canon] of legacyPairs.entries()) {
-      await supabase.from('whatsapp_messages').update({ jid: canon } ) .eq('jid', legacy)
+      await supabase.from('whatsapp_messages').update({ jid: canon }) .eq('jid', legacy)
       await supabase.from('whatsapp_conversations').delete().eq('jid', legacy)
     }
 
@@ -318,22 +328,28 @@ export async function getWhatsAppMessages(req: AuthRequest, res: Response, next:
       (existing || []).map((m: any) => `${m.timestamp}|${m.message_content}`)
     )
 
-    for (const msg of messages) {
-      const content = msg.message.conversation || msg.message.extendedTextMessage?.text || ''
-      const timestamp = new Date(msg.messageTimestamp * 1000).toISOString()
+    const toInsert = messages
+      .filter((msg: any) => {
+        const content = msg.message?.conversation || msg.message?.extendedTextMessage?.text || ''
+        const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString()
+        return content && !existingKeys.has(`${timestamp}|${content}`)
+      })
+      .map((msg: any) => ({
+        jid: normalizeJid(jid),
+        message_content: msg.message.conversation || msg.message.extendedTextMessage?.text || '',
+        direction: msg.key.fromMe ? 'outbound' : 'inbound',
+        sender_type: msg.key.fromMe ? 'user' : 'contact',
+        timestamp: new Date(Number(msg.messageTimestamp) * 1000).toISOString(),
+        push_name: msg.pushName,
+        integration_id: integration?.id
+      }))
 
-      if (content && !existingKeys.has(`${timestamp}|${content}`)) {
-        await supabase
+    if (toInsert.length > 0) {
+      for (let i = 0; i < toInsert.length; i += 100) {
+        const { error: insertError } = await supabase
           .from('whatsapp_messages')
-          .insert({
-            jid: normalizeJid(jid),
-            message_content: content,
-            direction: msg.key.fromMe ? 'outbound' : 'inbound',
-            sender_type: msg.key.fromMe ? 'user' : 'contact',
-            timestamp,
-            push_name: msg.pushName,
-            integration_id: integration?.id
-          })
+          .insert(toInsert.slice(i, i + 100))
+        if (insertError) throw insertError
       }
     }
 
@@ -364,31 +380,49 @@ export async function sendWhatsAppMessage(req: AuthRequest, res: Response, next:
     const config = await resolveConfig(req.body?.config || req.body)
     const integration = await getWhatsAppIntegration()
 
-    if (integration?.config?.phone && normalizeJid(jid) === normalizeJid(integration.config.phone)) {
-      const { data: saved, error: saveError } = await supabase
+    const normalizedJid = normalizeJid(jid)
+    const isSelf = integration?.config?.phone && normalizedJid === normalizeJid(integration.config.phone)
+
+    // Atualiza a conversa (existe ou cria) com a última mensagem
+    const { data: saved, error: saveError } = await supabase
+      .from('whatsapp_conversations')
+      .update({
+        last_message: text,
+        last_message_timestamp: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('jid', normalizedJid)
+      .select()
+      .maybeSingle()
+
+    if (saveError) throw saveError
+    if (!saved) {
+      const { error: insertConvError } = await supabase
         .from('whatsapp_conversations')
-        .update({
+        .insert({
+          jid: normalizedJid,
+          name: isSelf ? 'Eu' : normalizedJid,
           last_message: text,
           last_message_timestamp: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          integration_id: integration?.id
         })
-        .eq('jid', normalizeJid(jid))
-        .select()
-        .maybeSingle()
-
-      if (saveError) throw saveError
-      if (!saved) {
-        await supabase
-          .from('whatsapp_conversations')
-          .insert({
-            jid: normalizeJid(jid),
-            name: 'Eu',
-            last_message: text,
-            last_message_timestamp: new Date().toISOString(),
-            integration_id: integration?.id
-          })
-      }
+      if (insertConvError) throw insertConvError
     }
+
+    // Persiste a mensagem enviada no banco para o painel refletir imediatamente
+    const sentTimestamp = new Date().toISOString()
+    const { error: insertMsgError } = await supabase
+      .from('whatsapp_messages')
+      .insert({
+        jid: normalizedJid,
+        message_content: text,
+        direction: 'outbound',
+        sender_type: 'user',
+        timestamp: sentTimestamp,
+        push_name: null,
+        integration_id: integration?.id
+      })
+    if (insertMsgError) throw insertMsgError
 
     evolutionApiService.configure({
       apiUrl: config.apiUrl,

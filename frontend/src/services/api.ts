@@ -9,12 +9,20 @@ function authHeaders(): Record<string, string> {
   }
 }
 
+async function parseResponse(response: Response) {
+  const json = await response.json().catch(() => ({}))
+  if (!response.ok || json?.success === false) {
+    throw new Error(json?.error || json?.message || `Erro ${response.status} na API`)
+  }
+  return json
+}
+
 export const api = {
   async get(endpoint: string) {
     const response = await fetch(`${API_URL}${endpoint}`, {
       headers: authHeaders(),
     })
-    return response.json()
+    return parseResponse(response)
   },
 
   async post(endpoint: string, body: any) {
@@ -23,7 +31,7 @@ export const api = {
       headers: authHeaders(),
       body: JSON.stringify(body),
     })
-    return response.json()
+    return parseResponse(response)
   },
 
   async put(endpoint: string, body: any) {
@@ -32,7 +40,7 @@ export const api = {
       headers: authHeaders(),
       body: JSON.stringify(body),
     })
-    return response.json()
+    return parseResponse(response)
   },
 
   async delete(endpoint: string) {
@@ -40,7 +48,7 @@ export const api = {
       method: 'DELETE',
       headers: authHeaders(),
     })
-    return response.json()
+    return parseResponse(response)
   },
 }
 

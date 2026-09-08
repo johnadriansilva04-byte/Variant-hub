@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express'
 import { AuthRequest } from '../middleware/auth'
 import { supabase } from '../db'
 import { createError } from '../middleware/errorHandler'
+import { evolutionApiService } from '../services/evolutionApi'
 
 function normalizeInboundJid(raw: string): string {
   const trimmed = (raw || '').trim().replace(/@s\.whatsapp\.net$/, '')
@@ -170,7 +171,6 @@ export async function syncWhatsAppMessages(req: AuthRequest, res: Response, next
       return res.json({ success: true, synced: 0, total: rows.length, error: 'whatsapp_nao_configurado' })
     }
 
-    const { evolutionApiService } = await import('../services/evolutionApi')
     evolutionApiService.configure({
       apiUrl: config.apiUrl,
       apiKey: config.apiKey,

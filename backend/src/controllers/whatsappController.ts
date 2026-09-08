@@ -152,6 +152,44 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
     const config = await resolveConfig(candidate)
     const integration = await getWhatsAppIntegration()
 
+    // Cache curto: se o Supabase ja foi sincronizado ha menos de 15s,
+    // retorna direto do banco sem chamar a Evolution API (evita lentidao no painel
+    const { data: lastUpdatedRows } = await supabase
+      .from('whatsapp_conversations')
+      .select('updated_at')
+      .order('updated_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+
+    const lastUpdated = lastUpdatedRows?.[0]?.updated_at
+    const fresh = lastUpdated &&
+      Date.now() - new Date(lastUpdated).getTime() < 15_000
+
+    if (fresh) {
+      const { data: cachedConversations, error: cacheError } = await supabase
+        .from('whatsapp_conversations')
+        .select('*')
+        .order('last_message_timestamp', { ascending: false, nullsFirst: false })
+        .limit(200)
+
+      if (cacheError) throw cacheError
+
+      return res.json({
+        success: true,
+        data: (cachedConversations || []).map((chat: any) => ({
+          id: chat.jid,
+          customer: chat.name || chat.jid,
+          initials: (chat.name || chat.jid).substring(0, 2).toUpperCase(),
+          context: chat.last_message || 'Sem mensagem',
+          origin: 'WhatsApp',
+          lastActivity: chat.last_message_timestamp
+            ? new Date(chat.last_message_timestamp).toLocaleString('pt-BR')
+            : '—',
+          handledBy: 'IA' as const,
+          status: 'Novo' as const
+        }))
+      })
+    }
+
     evolutionApiService.configure({
       apiUrl: config.apiUrl,
       apiKey: config.apiKey,

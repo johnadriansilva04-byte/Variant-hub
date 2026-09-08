@@ -148,7 +148,7 @@ function cleanChatName(jid: string, rawName: string | null | undefined, selfPhon
     const jn = j.split('@')[0].replace(/[^0-9]/g, '')
     if (jn === sp || jn.replace(/^55/,'' ) === sp.replace(/^55/,'' )) return 'Você'
   }
-  if (trimmed && !trimmed.includes('@')) return trimmed
+  if (trimmed && !trimmed.includes('@') && !['você','voce','you','eu'].includes(trimmed.toLowerCase()) && !/^\+?\d{8,}$/.test(trimmed)) return trimmed
   if (j.includes('@g.us')) return 'Grupo de WhatsApp'
   if (j.includes('@lid') || j.includes('@broadcast')) return 'Contato'
   const d = j.split('@')[0].replace(/[^0-9]/g, '' ).replace(/^55/, '' )

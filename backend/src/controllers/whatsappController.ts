@@ -209,19 +209,25 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
       if (canon && canon !== jid) legacyToCanonical.set(jid, canon)
     }
 
+    const canonicalGroups = new Map<string, string[]>()
     for (const [legacy, canon] of legacyToCanonical.entries()) {
+      const list = canonicalGroups.get(canon) || []
+      list.push(legacy)
+      canonicalGroups.set(canon, list)
+    }
+    await Promise.all([...canonicalGroups.entries()].map(async ([canon, legacies]) => {
       const { error: reasError } = await supabase
         .from('whatsapp_messages')
         .update({ jid: canon })
-        .eq('jid', legacy)
+        .in('jid', legacies)
       if (reasError) throw reasError
 
       const { error: delError } = await supabase
         .from('whatsapp_conversations')
         .delete()
-        .eq('jid', legacy)
+        .in('jid', legacies)
       if (delError) throw delError
-    }
+    }))
     const seenRows = new Set<string>()
     const uniqueRows = rows.filter((r: any) => {
       const k = r.jid
@@ -271,10 +277,16 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
       if (canon && canon !== jid) legacyPairs.set(jid, canon)
     }
 
+    const legacyGroups = new Map<string, string[]>()
     for (const [legacy, canon] of legacyPairs.entries()) {
-      await supabase.from('whatsapp_messages').update({ jid: canon }) .eq('jid', legacy)
-      await supabase.from('whatsapp_conversations').delete().eq('jid', legacy)
+      const list = legacyGroups.get(canon) || []
+      list.push(legacy)
+      legacyGroups.set(canon, list)
     }
+    await Promise.all([...legacyGroups.entries()].map(async ([canon, legacies]) => {
+      await supabase.from('whatsapp_messages').update({ jid: canon }) .in('jid', legacies)
+      await supabase.from('whatsapp_conversations').delete().in('jid', legacies)
+    }))
 
 
     const conversations = (savedConversations || []).map((chat: any) => ({

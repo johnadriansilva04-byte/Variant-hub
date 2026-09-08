@@ -3,6 +3,24 @@ import { AuthRequest } from '../middleware/auth'
 import { supabase } from '../db'
 import { createError } from '../middleware/errorHandler'
 import { evolutionApiService } from '../services/evolutionApi'
+import {
+  fullSync,
+  incrementalSync,
+  getMediaForMessage,
+  displayName,
+  initialsOf,
+  isSelfJid,
+  jidDigits,
+  normalizeJidForStore,
+  typeLabel
+} from '../services/whatsappSyncService'
+
+// ─────────────────────────────────────────────────────────────
+// WhatsApp Controller — REBUILD
+// O banco é um espelho da Evolution API. Tudo aqui LÊ do banco
+// (que é preenchido pelo WhatsappSyncService), nunca inventa
+// dados, e sempre ordena por última mensagem (chegada) DESC.
+// ─────────────────────────────────────────────────────────────
 
 async function getWhatsAppIntegration() {
   const { data, error } = await supabase
@@ -10,23 +28,29 @@ async function getWhatsAppIntegration() {
     .select('*')
     .eq('type', 'whatsapp')
     .maybeSingle()
-
   if (error) throw error
   return data
 }
 
+async function resolveConfig(candidate: any) {
+  if (candidate?.apiUrl && candidate?.apiKey && candidate?.instanceName) {
+    return candidate
+  }
+  const integration = await getWhatsAppIntegration()
+  if (!integration?.config?.apiUrl || !integration.config.apiKey || !integration.config.instanceName) {
+    throw createError('WhatsApp não configurado no backend', 400)
+  }
+  return integration.config
+}
+
+// ── Config / Status ──────────────────────────────────────────
+
 export async function getWhatsAppConfig(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const integration = await getWhatsAppIntegration()
-
     res.json({
       success: true,
-      data: integration?.config || {
-        apiUrl: '',
-        apiKey: '',
-        instanceName: '',
-        phone: ''
-      }
+      data: integration?.config || { apiUrl: '', apiKey: '', instanceName: '', phone: '' }
     })
   } catch (error) {
     next(error)
@@ -36,61 +60,41 @@ export async function getWhatsAppConfig(req: AuthRequest, res: Response, next: N
 export async function saveWhatsAppConfig(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const { apiUrl, apiKey, instanceName, phone } = req.body
-
     if (!apiUrl || !apiKey || !instanceName) {
       throw createError('Configuração incompleta', 400)
     }
 
-    const config = { apiUrl, apiKey, instanceName, phone: phone || '' }
+    const config = { apiUrl, apiKey, instanceName, phone: phone ? String(phone).replace(/\D/g, '') : '' }
     const integration = await getWhatsAppIntegration()
 
-    let buildError
-    let saved
-
+    let saved: any
     if (integration) {
       const result = await supabase
         .from('integrations')
-        .update({
-          config,
-          credentials: { apiKey },
-          status: 'active',
-          updated_at: new Date().toISOString()
-        })
+        .update({ config, credentials: { apiKey }, status: 'active', updated_at: new Date().toISOString() })
         .eq('id', integration.id)
         .select()
         .single()
-      buildError = result.error
+      if (result.error) throw result.error
       saved = result.data
     } else {
       const result = await supabase
         .from('integrations')
-        .insert({
-          name: 'WhatsApp',
-          type: 'whatsapp',
-          config,
-          credentials: { apiKey },
-          status: 'active'
-        })
+        .insert({ name: 'WhatsApp', type: 'whatsapp', config, credentials: { apiKey }, status: 'active' })
         .select()
         .single()
-      buildError = result.error
+      if (result.error) throw result.error
       saved = result.data
     }
 
-    if (buildError) throw buildError
-
-    // Registra o webhook na Evolution para receber mensagens em tempo real
     try {
       evolutionApiService.configure(config)
       await evolutionApiService.setWebhook()
     } catch {
-      // webhook é best-effort; o sync de 30s cobre eventuais falhas
+      // webhook é best-effort; o sync incremental cobre falhas
     }
 
-    res.json({
-      success: true,
-      data: saved
-    })
+    res.json({ success: true, data: saved })
   } catch (error) {
     next(error)
   }
@@ -99,25 +103,14 @@ export async function saveWhatsAppConfig(req: AuthRequest, res: Response, next: 
 export async function getWhatsAppStatus(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const config = await resolveConfig(req.body?.config || req.body)
-
-    if (!config || !config.apiUrl || !config.apiKey || !config.instanceName) {
-      throw createError('Configuração incompleta', 400)
-    }
-
-    evolutionApiService.configure({
-      apiUrl: config.apiUrl,
-      apiKey: config.apiKey,
-      instanceName: config.instanceName
-    })
-
+    evolutionApiService.configure({ apiUrl: config.apiUrl, apiKey: config.apiKey, instanceName: config.instanceName })
     const status = await evolutionApiService.getInstanceStatus()
-    
     res.json({
       success: true,
       data: {
         connected: status.state === 'open',
         state: status.state,
-        instance: status.instance
+        instance: { instanceName: config.instanceName, status: status.state }
       }
     })
   } catch (error) {
@@ -125,469 +118,243 @@ export async function getWhatsAppStatus(req: AuthRequest, res: Response, next: N
   }
 }
 
-// ── Phone helpers ──────────────────────────────────────────────
-// Brazilian phone: DDD (2) + 9 digits (mobile, starts with 9) or 8 digits (landline)
-// JID format from Evolution API: 55XXXXXXXXXXX@s.whatsapp.net (13 digits with country code)
+// ── Conversas (espelho do banco, ordem de chegada) ───────────
 
-/** Extract digits from a JID, stripping @s.whatsapp.net */
-function jidDigits(rawJid: string): string {
-  return (rawJid || '').trim().split('@')[0].replace(/[^0-9]/g, '')
-}
-
-/** Format Brazilian phone for display: (48) 99880-030 */
-function formatBR(digits: string): string {
-  const d = digits.replace(/^55/, '')  // strip country code
-  if (d.length === 11) {
-    // Mobile: DDD(2) + 9(1) + 8 = 11 digits
-    return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`
-  }
-  if (d.length === 10) {
-    // Landline: DDD(2) + 8 = 10 digits
-    return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`
-  }
-  return d  // fallback: just show digits
-}
-
-/** Normalize JID for database key — keep domain suffix for groups/lid */
-function normalizeJid(raw: string): string {
-  const s = (raw || '').trim()
-  if (s.includes('@g.us') || s.includes('@lid') || s.includes('@broadcast')) return s
-  // Phone: strip @s.whatsapp.net, keep digits with 55 prefix
-  return jidDigits(s)
-}
-
-/** Check if JID is the user's own number */
-function isSelfJid(rawJid: string, selfPhone?: string): boolean {
-  if (!selfPhone) return false
-  const sp = String(selfPhone).replace(/[^0-9]/g, '')
-  const jd = jidDigits(rawJid)
-  return jd === sp || jd === `55${sp}` || jd.replace(/^55/, '') === sp.replace(/^55/, '')
-}
-
-/** Resolve display name for a chat */
-function cleanChatName(rawJid: string, pushName: string | null | undefined, selfPhone?: string): string {
-  const name = (pushName || '').trim()
-  // 1. Self → "Você"
-  if (isSelfJid(rawJid, selfPhone)) return 'Você'
-  // 2. Real push name (not a number, not junk)
-  if (name && !name.includes('@') && !/^\d{6,}$/.test(name) && !['contato','you','eu'].includes(name.toLowerCase())) {
-    return name
-  }
-  // 3. Group
-  if (rawJid.includes('@g.us')) return 'Grupo'
-  // 4. LID / broadcast — no phone number available
-  if (rawJid.includes('@lid') || rawJid.includes('@broadcast')) {
-    return name || 'Sem nome'
-  }
-  // 5. Phone number → format
-  const digits = jidDigits(rawJid)
-  if (digits.length >= 10) return formatBR(digits)
-  return name || 'Sem nome'
-}
-
-
-async function resolveConfig(candidate: any) {
-  if (candidate?.apiUrl && candidate?.apiKey && candidate?.instanceName) {
-    return candidate
-  }
-
-  const integration = await getWhatsAppIntegration()
-  if (!integration?.config?.apiUrl || !integration.config.apiKey || !integration.config.instanceName) {
-
-    throw createError('WhatsApp não configurado no backend', 400)
-  }
-
-  return integration.config
+function previewOf(conv: any): { preview: string; previewType: string } {
+  const label = typeLabel(conv.last_message_type, conv.last_message || null)
+  const raw = (conv.last_message || '').replace(/\s+/g, ' ').trim()
+  const preview = label && raw ? `${label} · ${raw}` : label || raw || 'Sem mensagem'
+  return { preview: preview.slice(0, 120), previewType: conv.last_message_type || 'text' }
 }
 
 export async function getWhatsAppConversations(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const candidate = req.body?.config || req.body
-    const config = await resolveConfig(candidate)
+    const config = await resolveConfig(req.body?.config || req.body)
     const integration = await getWhatsAppIntegration()
+    const selfPhone = req.body?.config?.phone || integration?.config?.phone || null
+    const ownerJid = selfPhone ? `55${String(selfPhone).replace(/\D/g, '')}` : null
 
-const selfPhone = (candidate && candidate.phone) || (integration?.config && (integration.config as any).phone)
-    // Cache curto: se o Supabase ja foi sincronizado ha menos de 25s,
-    // retorna direto do banco sem chamar a Evolution API (evita lentidao no painel
-    const { data: lastUpdatedRows } = await supabase
-      .from('whatsapp_conversations')
-      .select('updated_at')
-      .order('updated_at', { ascending: false, nullsFirst: false })
-      .limit(1)
-
-    const lastUpdated = lastUpdatedRows?.[0]?.updated_at
-    const fresh = lastUpdated &&
-      Date.now() - new Date(lastUpdated).getTime() < 25_000
-
-    if (fresh) {
-      const { data: cachedConversations, error: cacheError } = await supabase
-        .from('whatsapp_conversations')
-        .select('*')
-        .order('last_message_timestamp', { ascending: false, nullsFirst: false })
-        .limit(200)
-
-      if (cacheError) throw cacheError
-
-      const rawCached = (cachedConversations || []).map((chat: any) => {
-        const displayName = cleanChatName(chat.jid, chat.name, selfPhone)
-        const rawPreview = chat.last_message || ''
-        const preview = rawPreview.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Sem mensagem'
-        const isSelf = isSelfJid(chat.jid, selfPhone)
-        return {
-          id: chat.jid,
-          customer: displayName,
-          initials: displayName.substring(0, 2).toUpperCase(),
-          context: preview,
-          origin: 'WhatsApp',
-          isSelf,
-          lastActivity: chat.last_message_timestamp
-            ? new Date(chat.last_message_timestamp).toLocaleString('pt-BR')
-            : '—',
-          lastTimestamp: chat.last_message_timestamp || null,
-          handledBy: 'IA' as const,
-          status: 'Novo' as const
-        }
-      })
-      const cachedConversationsSorted = rawCached
-        .filter((c: any) => !c.isSelf)
-        .sort((a: any, b: any) => {
-          const ta = a.lastTimestamp ? new Date(a.lastTimestamp).getTime() : 0
-          const tb = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : 0
-          return tb - ta
-        })
-        .map(({ lastTimestamp: _, isSelf: __, ...rest }: any) => rest)
-
-      return res.json({
-        success: true,
-        data: cachedConversationsSorted
-      })
-    }
-
-    evolutionApiService.configure({
-      apiUrl: config.apiUrl,
-      apiKey: config.apiKey,
-      instanceName: config.instanceName
-    })
-
-    const chats = await evolutionApiService.getChats(500)
-
-    const lastMessageOf = (chat: any) =>
-      typeof chat.lastMessage === 'string'
-        ? chat.lastMessage
-        : chat.lastMessage?.message?.conversation ||
-          chat.lastMessage?.message?.extendedTextMessage?.text ||
-          ''
-
-    const lastMessageTimestampOf = (chat: any) =>
-      typeof chat.lastMessage === 'number'
-        ? chat.lastMessage
-        : chat.lastMessage?.messageTimestamp
-
-    const rows = chats.map((chat) => ({
-      jid: normalizeJid(chat.id),
-      name: cleanChatName(chat.id, chat.name, selfPhone),
-      last_message: lastMessageOf(chat),
-      last_message_timestamp: lastMessageTimestampOf(chat)
-        ? new Date(lastMessageTimestampOf(chat) * 1000).toISOString()
-        : null,
-      unread_count: chat.unreadCount || 0,
-      integration_id: integration?.id,
-      updated_at: new Date().toISOString()
-    }))
-
-    const canonicalJids = rows.map(r => r.jid)
-    const legacyToCanonical = new Map<string, string>()
-
-    const digitsOf = (jid: string): string => jid.split('@')[0].replace(/[^0-9]/g, '')
-    const shortOf = (jid: string): string => { const d = digitsOf(jid); return d.startsWith('55') ? d.slice(2) : d }
-    const canonicalize = (jid: string): string | null => {
-      const dig = digitsOf(jid)
-      if (dig.length < 10 || dig.length > 13) return null
-      const ddd = shortOf(jid).slice(0, 2)
-      const tail = shortOf(jid).slice(-6)
-      const cands = canonicalJids.filter(o => {
-        const od = digitsOf(o)
-        if (od.length !== 12 || !od.startsWith('55')) return false
-        const os = shortOf(o)
-        return os.slice(0, 2) === ddd && os.slice(-6) === tail
-      })
-      if (cands.length === 0) return null
-      return cands[0]
-    }
-
-    for (const jid of canonicalJids) {
-      const canon = canonicalize(jid)
-      if (canon && canon !== jid) legacyToCanonical.set(jid, canon)
-    }
-
-    const canonicalGroups = new Map<string, string[]>()
-    for (const [legacy, canon] of legacyToCanonical.entries()) {
-      const list = canonicalGroups.get(canon) || []
-      list.push(legacy)
-      canonicalGroups.set(canon, list)
-    }
-    await Promise.all([...canonicalGroups.entries()].map(async ([canon, legacies]) => {
-      const { error: reasError } = await supabase
-        .from('whatsapp_messages')
-        .update({ jid: canon })
-        .in('jid', legacies)
-      if (reasError) throw reasError
-
-      const { error: delError } = await supabase
-        .from('whatsapp_conversations')
-        .delete()
-        .in('jid', legacies)
-      if (delError) throw delError
-    }))
-    const seenRows = new Set<string>()
-    const uniqueRows = rows.filter((r: any) => {
-      const k = r.jid
-      if (seenRows.has(k)) return false
-      seenRows.add(k)
-      return true
-    })
-    if (uniqueRows.length > 0) {
-      for (let i = 0; i < uniqueRows.length; i += 100) {
-        const { error: upsertError } = await supabase
-          .from('whatsapp_conversations')
-          .upsert(uniqueRows.slice(i, i + 100), {
-            onConflict: 'jid',
-            ignoreDuplicates: false
-          })
-        if (upsertError) throw upsertError
-      }
-
-      const activeJids = new Set(uniqueRows.map(r => r.jid))
-      const { data: staleAll, error: staleErr } = await supabase
-        .from('whatsapp_conversations')
-        .select('jid')
-      if (staleErr) throw staleErr
-      const staleJids = (staleAll || []).map((c: any) => c.jid).filter((j: string) => !activeJids.has(j))
-      if (staleJids.length > 0) {
-        await supabase.from('whatsapp_messages').delete().in('jid', staleJids)
-        await supabase.from('whatsapp_conversations').delete().in('jid', staleJids)
-      }
-    }
-
-    const { data: savedConversations, error: fetchError } = await supabase
+    // Sempre lê do banco (preenchido pelo sync). Ordem = última mensagem DESC.
+    const { data, error } = await supabase
       .from('whatsapp_conversations')
       .select('*')
       .order('last_message_timestamp', { ascending: false, nullsFirst: false })
-      .limit(200)
+      .limit(300)
 
-    if (fetchError) throw fetchError
-    const savedJids = (savedConversations || []).map((c: any) => c.jid)
-    const shortOf2 = (jid: string): string => { const d = jid.split('@')[0].replace(/[^0-9]/g, ''); return d.startsWith('55') ? d.slice(2) : d }
-    const canonOf = (jid: string): string | null => {
-      const dig = jid.split('@')[0].replace(/[^0-9]/g, '')
-      if (dig.length < 10 || dig.length > 13) return null
-      const ddd = shortOf2(jid).slice(0, 2)
-      const tail = shortOf2(jid).slice(-6)
-      const cands = savedJids.filter(o => {
-        const od = o.split('@')[0].replace(/[^0-9]/g, '')
-        if (od.length !== 12 || !od.startsWith('55')) return false
-        const os = shortOf2(o)
-        return os.slice(0, 2) === ddd && os.slice(-6) === tail
+    if (error) throw error
+
+    const conversations = (data || [])
+      .filter((chat: any) => !isSelfJid(chat.jid, ownerJid))
+      .map((chat: any) => {
+        const name = displayName(chat.jid, chat.name, chat.contact_name, ownerJid)
+        const { preview, previewType } = previewOf(chat)
+        return {
+          id: chat.jid,
+          name,
+          initials: initialsOf(name),
+          photo: chat.photo_url || null,
+          preview,
+          previewType,
+          lastMessageFromMe: Boolean(chat.last_message_from_me),
+          lastActivity: chat.last_message_timestamp || null,
+          unread: chat.unread_count || 0,
+          isGroup: Boolean(chat.is_group) || chat.jid.includes('@g.us') || chat.jid.includes('@broadcast'),
+          origin: 'WhatsApp'
+        }
       })
-      if (cands.length === 0) return null
-      return cands[0]
-    }
-
-    const legacyPairs = new Map<string, string>()
-    for (const jid of savedJids) {
-      const canon = canonOf(jid)
-      if (canon && canon !== jid) legacyPairs.set(jid, canon)
-    }
-
-    const legacyGroups = new Map<string, string[]>()
-    for (const [legacy, canon] of legacyPairs.entries()) {
-      const list = legacyGroups.get(canon) || []
-      list.push(legacy)
-      legacyGroups.set(canon, list)
-    }
-    await Promise.all([...legacyGroups.entries()].map(async ([canon, legacies]) => {
-      await supabase.from('whatsapp_messages').update({ jid: canon }) .in('jid', legacies)
-      await supabase.from('whatsapp_conversations').delete().in('jid', legacies)
-    }))
-
-
-    const rawConversations = (savedConversations || []).map((chat: any) => {
-      const displayName = cleanChatName(chat.jid, chat.name, selfPhone)
-      const rawPreview = chat.last_message || ''
-      // Trunca preview: max 80 chars, sem quebras de linha
-      const preview = rawPreview.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Sem mensagem'
-      return {
-        id: chat.jid,
-        customer: displayName,
-        initials: displayName.substring(0, 2).toUpperCase(),
-        context: preview,
-        origin: 'WhatsApp',
-        isSelf: isSelfJid(chat.jid, selfPhone),
-        lastActivity: chat.last_message_timestamp 
-          ? new Date(chat.last_message_timestamp).toLocaleString('pt-BR')
-          : '—',
-        lastTimestamp: chat.last_message_timestamp || null,
-        handledBy: 'IA' as const,
-        status: 'Novo' as const
-      }
-    })
-
-    // Filtra self e ordena por timestamp desc
-    const conversations = rawConversations
-      .filter((c: any) => !c.isSelf)
       .sort((a: any, b: any) => {
-        const ta = a.lastTimestamp ? new Date(a.lastTimestamp).getTime() : 0
-        const tb = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : 0
+        const ta = a.lastActivity ? new Date(a.lastActivity).getTime() : 0
+        const tb = b.lastActivity ? new Date(b.lastActivity).getTime() : 0
         return tb - ta
       })
-      .map(({ lastTimestamp: _, isSelf: __, ...rest }: any) => rest)
 
-    res.json({
-      success: true,
-      data: conversations
-    })
+    res.json({ success: true, data: conversations })
   } catch (error) {
     next(error)
   }
 }
+
+// ── Mensagens (paginação por timestamp) ──────────────────────
 
 export async function getWhatsAppMessages(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const { jid } = req.params
-    const { limit = 50 } = req.body
+    const limit = Math.min(Number(req.body?.limit) || 100, 200)
+    const before = req.body?.before || null // timestamp ISO: busca mensagens MAIS ANTIGAS
 
     if (!jid) throw createError('jid é obrigatório', 400)
+    const jidStored = normalizeJidForStore(jid)
 
-    const config = await resolveConfig(req.body?.config || req.body)
-    const integration = await getWhatsAppIntegration()
-
-    evolutionApiService.configure({
-      apiUrl: config.apiUrl,
-      apiKey: config.apiKey,
-      instanceName: config.instanceName
-    })
-
-    const messages = await evolutionApiService.getMessages(normalizeJid(jid), Number(limit))
-
-    const { data: existing, error: existingError } = await supabase
+    let query = supabase
       .from('whatsapp_messages')
-      .select('id, jid, message_content, timestamp')
-      .eq('jid', normalizeJid(jid))
+      .select('*')
+      .eq('jid', jidStored)
+      .order('timestamp', { ascending: false })
+      .limit(limit)
 
-    if (existingError) throw existingError
-
-    const existingKeys = new Set(
-      (existing || []).map((m: any) => `${m.timestamp}|${m.message_content}`)
-    )
-
-    const toInsert = messages
-      .filter((msg: any) => {
-        const content = msg.message?.conversation || msg.message?.extendedTextMessage?.text || ''
-        const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString()
-        return content && !existingKeys.has(`${timestamp}|${content}`)
-      })
-      .map((msg: any) => ({
-        jid: normalizeJid(jid),
-        message_content: msg.message?.conversation || msg.message?.extendedTextMessage?.text || '',
-        direction: msg.key.fromMe ? 'outbound' : 'inbound',
-        sender_type: msg.key.fromMe ? 'user' : 'contact',
-        timestamp: new Date(Number(msg.messageTimestamp) * 1000).toISOString(),
-        push_name: msg.pushName,
-        integration_id: integration?.id
-      }))
-
-    if (toInsert.length > 0) {
-      for (let i = 0; i < toInsert.length; i += 100) {
-        const { error: insertError } = await supabase
-          .from('whatsapp_messages')
-          .insert(toInsert.slice(i, i + 100))
-        if (insertError) throw insertError
-      }
+    if (before) {
+      query = query.lt('timestamp', before)
     }
 
-    const transformedMessages = messages.map((msg) => ({
-      id: msg.key.id,
-      content: msg.message?.conversation || msg.message?.extendedTextMessage?.text || '',
-      direction: msg.key.fromMe ? 'outbound' : 'inbound',
-      senderType: msg.key.fromMe ? 'user' : 'contact',
-      timestamp: new Date(msg.messageTimestamp * 1000).toISOString(),
-      pushName: msg.pushName
+    const { data, error } = await query
+    if (error) throw error
+
+    const messages = (data || []).map((m: any) => ({
+      id: m.message_id || m.id,
+      type: m.message_type || 'text',
+      content: m.message_content || '',
+      caption: m.media_caption || null,
+      direction: m.direction || 'inbound',
+      senderType: m.sender_type || 'contact',
+      senderName: m.sender_name || null,
+      timestamp: m.timestamp,
+      hasMedia: Boolean(m.media),
+      mediaMime: m.media_mime || null,
+      status: m.status || 'PENDING'
     }))
 
     res.json({
       success: true,
-      data: transformedMessages
+      data: messages,
+      hasMore: (data || []).length >= limit
     })
   } catch (error) {
     next(error)
   }
 }
 
+// ── Contato (painel de detalhes) ─────────────────────────────
+
+export async function getWhatsAppContact(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { jid } = req.params
+    if (!jid) throw createError('jid é obrigatório', 400)
+    const jidStored = normalizeJidForStore(jid)
+
+    const { data: conv } = await supabase
+      .from('whatsapp_conversations')
+      .select('*')
+      .eq('jid', jidStored)
+      .limit(1)
+
+    const { count } = await supabase
+      .from('whatsapp_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('jid', jidStored)
+
+    const c = conv?.[0]
+    const config = await resolveConfig(req.body?.config || req.body)
+    const ownerJid = config.phone ? `55${String(config.phone).replace(/\D/g, '')}` : null
+    const name = displayName(jidStored, c?.name, c?.contact_name, ownerJid)
+
+    res.json({
+      success: true,
+      data: {
+        jid: jidStored,
+        name,
+        initials: initialsOf(name),
+        photo: c?.photo_url || null,
+        phone: jidDigits(jidStored) || null,
+        isGroup: Boolean(c?.is_group) || jidStored.includes('@g.us'),
+        unread: c?.unread_count || 0,
+        totalMessages: count || 0,
+        lastActivity: c?.last_message_timestamp || null
+      }
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
+// ── Envio ────────────────────────────────────────────────────
+
 export async function sendWhatsAppMessage(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const { jid, text } = req.body
-
     if (!jid || !text) throw createError('jid e texto são obrigatórios', 400)
 
     const config = await resolveConfig(req.body?.config || req.body)
     const integration = await getWhatsAppIntegration()
+    const jidStored = normalizeJidForStore(jid)
 
-    const normalizedJid = normalizeJid(jid)
-    const isSelf = integration?.config?.phone && normalizedJid === normalizeJid(integration.config.phone)
+    evolutionApiService.configure({ apiUrl: config.apiUrl, apiKey: config.apiKey, instanceName: config.instanceName })
+    const result = await evolutionApiService.sendMessage(jidStored, text)
 
-    // Atualiza a conversa (existe ou cria) com a última mensagem
-    const { data: saved, error: saveError } = await supabase
-      .from('whatsapp_conversations')
-      .update({
-        last_message: text,
-        last_message_timestamp: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .eq('jid', normalizedJid)
-      .select()
-      .maybeSingle()
+    // Confirmação imediata no painel (mensagem enviada)
+    const sentTs = new Date().toISOString()
+    const messageId = result?.key?.id || `out-${Date.now()}`
+    await supabase.from('whatsapp_messages').upsert({
+      jid: jidStored,
+      message_id: messageId,
+      message_content: text,
+      message_type: 'text',
+      direction: 'outbound',
+      sender_type: 'user',
+      timestamp: sentTs,
+      status: 'SENT',
+      integration_id: integration?.id || null
+    }, { onConflict: 'jid,message_id', ignoreDuplicates: true })
 
-    if (saveError) throw saveError
-    if (!saved) {
-      const { error: insertConvError } = await supabase
-        .from('whatsapp_conversations')
-        .insert({
-          jid: normalizedJid,
-          name: isSelf ? 'Eu' : normalizedJid,
-          last_message: text,
-          last_message_timestamp: new Date().toISOString(),
-          integration_id: integration?.id
-        })
-      if (insertConvError) throw insertConvError
-    }
+    await supabase.from('whatsapp_conversations').upsert({
+      jid: jidStored,
+      name: null,
+      last_message: text,
+      last_message_timestamp: sentTs,
+      last_message_type: 'text',
+      last_message_from_me: true,
+      unread_count: 0,
+      integration_id: integration?.id || null,
+      updated_at: sentTs
+    }, { onConflict: 'jid', ignoreDuplicates: false })
 
-    // Persiste a mensagem enviada no banco para o painel refletir imediatamente
-    const sentTimestamp = new Date().toISOString()
-    const { error: insertMsgError } = await supabase
-      .from('whatsapp_messages')
-      .insert({
-        jid: normalizedJid,
-        message_content: text,
-        direction: 'outbound',
-        sender_type: 'user',
-        timestamp: sentTimestamp,
-        push_name: null,
-        integration_id: integration?.id
-      })
-    if (insertMsgError) throw insertMsgError
+    res.json({ success: true, data: result })
+  } catch (error) {
+    next(error)
+  }
+}
 
-    evolutionApiService.configure({
-      apiUrl: config.apiUrl,
-      apiKey: config.apiKey,
-      instanceName: config.instanceName
-    })
+// ── Sync ─────────────────────────────────────────────────────
 
-    const result = await evolutionApiService.sendMessage(normalizeJid(jid), text)
+export async function runFullSync(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const result = await fullSync(req.body?.config || req.body)
+    res.json({ success: true, data: result })
+  } catch (error) {
+    next(error)
+  }
+}
 
-    res.json({
-      success: true,
-      data: result
-    })
+export async function runIncrementalSync(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const result = await incrementalSync(req.body?.config || req.body)
+    res.json({ success: true, data: result })
+  } catch (error) {
+    next(error)
+  }
+}
+
+// ── Mídia (proxy) ────────────────────────────────────────────
+
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
+  'video/mp4': 'mp4', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a',
+  'application/pdf': 'pdf', 'text/plain': 'txt'
+}
+
+export async function getMedia(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const { jid, messageId } = req.params
+    if (!jid || !messageId) throw createError('jid e messageId são obrigatórios', 400)
+
+    const media = await getMediaForMessage(decodeURIComponent(jid), decodeURIComponent(messageId))
+    if (!media) throw createError('Mídia não encontrada', 404)
+
+    const ext = MIME_TO_EXT[media.mimetype] || 'bin'
+    const buffer = Buffer.from(media.base64, 'base64')
+    res.setHeader('Content-Type', media.mimetype)
+    res.setHeader('Cache-Control', 'public, max-age=300')
+    res.setHeader('Content-Disposition', `inline; filename="media-${messageId}.${ext}"`)
+    res.send(buffer)
   } catch (error) {
     next(error)
   }

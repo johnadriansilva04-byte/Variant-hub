@@ -130,6 +130,30 @@ CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_timestamp ON whatsapp_messages(
 CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_integration_id ON whatsapp_messages(integration_id);
 
 -- ============================================
+-- WHATSAPP REBUILD (remote_jid é a identidade real)
+-- ============================================
+
+-- Conversas: foto de perfil e tipo da última mensagem
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS photo_url TEXT;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS last_message_type VARCHAR(30) DEFAULT 'text';
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS last_message_from_me BOOLEAN DEFAULT FALSE;
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255);
+ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS is_group BOOLEAN DEFAULT FALSE;
+
+-- Mensagens: id real da Evolution (dedup), tipo e mídia
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS message_id VARCHAR(255);
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(30) DEFAULT 'text';
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media JSONB;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_mime VARCHAR(255);
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_caption TEXT;
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS sender_jid VARCHAR(255);
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'PENDING';
+
+-- Deduplicação real: (jid, message_id) nunca repete
+CREATE UNIQUE INDEX IF NOT EXISTS uq_whatsapp_messages_jid_message_id ON whatsapp_messages(jid, message_id);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_type ON whatsapp_messages(message_type);
+
+-- ============================================
 -- ORDERS
 -- ============================================
 

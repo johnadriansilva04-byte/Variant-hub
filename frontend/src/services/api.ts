@@ -83,22 +83,42 @@ export const whatsappApi = {
     return api.post('/whatsapp/config', config)
   },
 
-  async getStatus(config: any) {
-    return api.post('/whatsapp/status', config ?? {})
+  async getStatus(config?: any) {
+    return api.post('/whatsapp/status', { config: config ?? {} })
   },
 
   async getConversations(config?: any) {
     return api.post('/whatsapp/conversations', { config: config ?? {} })
   },
 
-  async getMessages(jid: string, config?: any, limit = 50) {
-    return api.post(`/whatsapp/messages/${jid}`, { config: config ?? {}, limit })
+  /** Mensagens paginadas. `before` (ISO) busca mais antigas — scroll infinito */
+  async getMessages(jid: string, config?: any, opts: { limit?: number; before?: string | null } = {}) {
+    return api.post(`/whatsapp/messages/${encodeURIComponent(jid)}`, {
+      config: config ?? {},
+      limit: opts.limit ?? 100,
+      before: opts.before ?? null
+    })
+  },
+
+  async getContact(jid: string, _config?: any) {
+    return api.get(`/whatsapp/contacts/${encodeURIComponent(jid)}`)
   },
 
   async sendMessage(jid: string, text: string, config?: any) {
     return api.post('/whatsapp/send', { jid, text, config: config ?? {} })
   },
-  async sync(config?: any) {
-    return api.post('/whatsapp/sync', { config: config ?? {} })
+
+  /** Sync incremental (só mensagens novas) — roda a cada 10s */
+  async syncIncremental(config?: any) {
+    return api.post('/whatsapp/sync/incremental', { config: config ?? {} })
+  },
+
+  /** Sync completo — login, troca de página, atualização manual */
+  async syncFull(config?: any) {
+    return api.post('/whatsapp/sync/full', { config: config ?? {} })
+  },
+
+  mediaUrl(jid: string, messageId: string): string {
+    return `${API_URL}/whatsapp/media/${encodeURIComponent(jid)}/${encodeURIComponent(messageId)}`
   },
 }

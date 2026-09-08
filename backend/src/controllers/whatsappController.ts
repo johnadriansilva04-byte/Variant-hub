@@ -153,7 +153,7 @@ function cleanChatName(jid: string, rawName: string | null | undefined, selfPhon
   if (j.includes('@lid') || j.includes('@broadcast')) return 'Contato'
   const d = j.split('@')[0].replace(/[^0-9]/g, '' ).replace(/^55/, '' )
   if (d.length >= 10) {
-    return `${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
+    return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
   }
   return d || 'Contato'
 }
@@ -237,7 +237,7 @@ export async function getWhatsAppConversations(req: AuthRequest, res: Response, 
         ? chat.lastMessage
         : chat.lastMessage?.messageTimestamp
 
-    const selfPhone = typeof integration?.config === 'object' && integration.config ? integration.config.phone : undefined
+    const selfPhone = (candidate?.phone as string) || (typeof integration?.config === 'object' && integration.config ? (integration.config as any).phone : undefined)
     const rows = chats.map((chat) => ({
       jid: normalizeJid(chat.id),
       name: cleanChatName(chat.id, chat.name, selfPhone),
